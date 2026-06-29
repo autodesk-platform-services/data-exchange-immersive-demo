@@ -1,0 +1,21 @@
+#@DataExchangeViewingService_HostAddress = https://localhost:7008
+@DataExchangeViewingService_HostAddress = https://data-exchange-viewing-service.azurewebsites.net
+@DataExchangeUrn = urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q
+@AccessToken = ...
+
+### Start exchange conversion
+POST {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{DataExchangeUrn}}
+Authorization: Bearer {{AccessToken}}
+
+### Get exchange conversion status
+GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{DataExchangeUrn}}
+Authorization: Bearer {{AccessToken}}
+
+### Get exchange conversion artifact
+GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{DataExchangeUrn}}/e055a5c2-3d6d-3229-bbaf-510a672ff1f1.obj
+Authorization: Bearer {{AccessToken}}
+Accept: model/obj
+
+### Delete exchange conversion
+DELETE {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{DataExchangeUrn}}
+Authorization: Bearer {{AccessToken}}
