@@ -45,24 +45,23 @@ public static class UsdzConverter
             materials = ResolveMaterials(groups, obj, textures);
         }
 
-        string usda;
-        using (memory?.Step("build USDA text layer"))
-        {
-            usda = BuildUsda(obj, groups, materials, modelName);
-        }
-
         // The default layer must be the archive's first entry.
         var layerName = modelName + ".usda";
-        List<UsdzEntry> entries;
-        using (memory?.Step("buffer USDA layer and textures for USDZ archive"))
+        var usdzFolder = Path.GetDirectoryName(Path.GetFullPath(usdzPath)) ?? ".";
+        var usdaPath = Path.Combine(usdzFolder, layerName);
+
+        using (memory?.Step("write USDA text layer"))
         {
-            entries = [new(layerName, Encoding.UTF8.GetBytes(usda))];
+            WriteUsda(usdaPath, obj, groups, materials, modelName);
+        }
+
+        List<UsdzEntry> entries;
+        using (memory?.Step("resolve USDA layer and textures for USDZ archive"))
+        {
+            entries = [new(layerName, usdaPath)];
             foreach (var (packageName, sourcePath) in textures.Files)
             {
-                using (memory?.Step($"read USDZ texture {packageName}"))
-                {
-                    entries.Add(new UsdzEntry(packageName, File.ReadAllBytes(sourcePath)));
-                }
+                entries.Add(new UsdzEntry(packageName, sourcePath));
             }
         }
 
@@ -136,42 +135,42 @@ public static class UsdzConverter
         return resolved;
     }
 
-    private static string BuildUsda(
+    private static void WriteUsda(
+        string path,
         ObjModel obj,
         IReadOnlyList<MeshGroup> groups,
         IReadOnlyDictionary<string, UsdMaterial> materials,
         string modelName)
     {
-        var sb = new StringBuilder();
-        sb.Append("#usda 1.0\n");
-        sb.Append("(\n");
-        sb.Append($"    defaultPrim = \"{modelName}\"\n");
-        sb.Append("    metersPerUnit = 1\n");
-        sb.Append("    upAxis = \"Y\"\n");
-        sb.Append(")\n\n");
+        using var writer = new StreamWriter(path, append: false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        writer.Write("#usda 1.0\n");
+        writer.Write("(\n");
+        writer.Write($"    defaultPrim = \"{modelName}\"\n");
+        writer.Write("    metersPerUnit = 1\n");
+        writer.Write("    upAxis = \"Y\"\n");
+        writer.Write(")\n\n");
 
-        sb.Append($"def Xform \"{modelName}\"\n");
-        sb.Append("{\n");
+        writer.Write($"def Xform \"{modelName}\"\n");
+        writer.Write("{\n");
 
         for (var i = 0; i < groups.Count; i++)
         {
-            AppendMesh(sb, obj, groups[i], materials[groups[i].MaterialKey], $"mesh_{i}", modelName);
+            WriteMesh(writer, obj, groups[i], materials[groups[i].MaterialKey], $"mesh_{i}", modelName);
         }
 
-        sb.Append("    def Scope \"Materials\"\n");
-        sb.Append("    {\n");
+        writer.Write("    def Scope \"Materials\"\n");
+        writer.Write("    {\n");
         foreach (var material in materials.Values)
         {
-            AppendMaterial(sb, material, modelName);
+            WriteMaterial(writer, material, modelName);
         }
-        sb.Append("    }\n");
+        writer.Write("    }\n");
 
-        sb.Append("}\n");
-        return sb.ToString();
+        writer.Write("}\n");
     }
 
-    private static void AppendMesh(
-        StringBuilder sb,
+    private static void WriteMesh(
+        TextWriter writer,
         ObjModel obj,
         MeshGroup group,
         UsdMaterial material,
@@ -219,70 +218,80 @@ public static class UsdzConverter
 
         var emitTexCoords = anyTexCoord || material.Texture is not null;
 
-        sb.Append($"    def Mesh \"{meshName}\"\n");
-        sb.Append("    {\n");
-        sb.Append("        uniform bool doubleSided = 1\n");
-        sb.Append($"        int[] faceVertexCounts = {FormatInts(faceVertexCounts)}\n");
-        sb.Append($"        int[] faceVertexIndices = {FormatInts(faceVertexIndices)}\n");
-        sb.Append($"        point3f[] points = {FormatVec3(points)}\n");
-        sb.Append($"        normal3f[] normals = {FormatVec3(normals)} (\n");
-        sb.Append("            interpolation = \"faceVarying\"\n");
-        sb.Append("        )\n");
+        writer.Write($"    def Mesh \"{meshName}\"\n");
+        writer.Write("    {\n");
+        writer.Write("        uniform bool doubleSided = 1\n");
+        writer.Write("        int[] faceVertexCounts = ");
+        WriteInts(writer, faceVertexCounts);
+        writer.Write('\n');
+        writer.Write("        int[] faceVertexIndices = ");
+        WriteInts(writer, faceVertexIndices);
+        writer.Write('\n');
+        writer.Write("        point3f[] points = ");
+        WriteVec3(writer, points);
+        writer.Write('\n');
+        writer.Write("        normal3f[] normals = ");
+        WriteVec3(writer, normals);
+        writer.Write(" (\n");
+        writer.Write("            interpolation = \"faceVarying\"\n");
+        writer.Write("        )\n");
         if (emitTexCoords)
         {
-            sb.Append($"        texCoord2f[] primvars:st = {FormatVec2(uvs)} (\n");
-            sb.Append("            interpolation = \"faceVarying\"\n");
-            sb.Append("        )\n");
+            writer.Write("        texCoord2f[] primvars:st = ");
+            WriteVec2(writer, uvs);
+            writer.Write(" (\n");
+            writer.Write("            interpolation = \"faceVarying\"\n");
+            writer.Write("        )\n");
         }
-        sb.Append($"        rel material:binding = </{modelName}/Materials/{material.Name}>\n");
-        sb.Append("    }\n");
+        writer.Write($"        rel material:binding = </{modelName}/Materials/{material.Name}>\n");
+        writer.Write("    }\n");
     }
 
-    private static void AppendMaterial(StringBuilder sb, UsdMaterial material, string modelName)
+    private static void WriteMaterial(TextWriter writer, UsdMaterial material, string modelName)
     {
         var basePath = $"/{modelName}/Materials/{material.Name}";
 
-        sb.Append($"        def Material \"{material.Name}\"\n");
-        sb.Append("        {\n");
-        sb.Append($"            token outputs:surface.connect = <{basePath}/surfaceShader.outputs:surface>\n\n");
+        writer.Write($"        def Material \"{material.Name}\"\n");
+        writer.Write("        {\n");
+        writer.Write($"            token outputs:surface.connect = <{basePath}/surfaceShader.outputs:surface>\n\n");
 
-        sb.Append("            def Shader \"surfaceShader\"\n");
-        sb.Append("            {\n");
-        sb.Append("                uniform token info:id = \"UsdPreviewSurface\"\n");
+        writer.Write("            def Shader \"surfaceShader\"\n");
+        writer.Write("            {\n");
+        writer.Write("                uniform token info:id = \"UsdPreviewSurface\"\n");
         if (material.Texture is not null)
         {
-            sb.Append($"                color3f inputs:diffuseColor.connect = <{basePath}/diffuseTexture.outputs:rgb>\n");
+            writer.Write($"                color3f inputs:diffuseColor.connect = <{basePath}/diffuseTexture.outputs:rgb>\n");
         }
         else
         {
-            sb.Append($"                color3f inputs:diffuseColor = {FormatColor(material.Diffuse)}\n");
+            writer.Write($"                color3f inputs:diffuseColor = {FormatColor(material.Diffuse)}\n");
         }
-        sb.Append("                float inputs:metallic = 0\n");
-        sb.Append($"                float inputs:opacity = {F(material.Alpha)}\n");
-        sb.Append("                float inputs:roughness = 1\n");
-        sb.Append("                int inputs:useSpecularWorkflow = 0\n");
-        sb.Append("                token outputs:surface\n");
-        sb.Append("            }\n");
+        writer.Write("                float inputs:metallic = 0\n");
+        writer.Write($"                float inputs:opacity = {F(material.Alpha)}\n");
+        writer.Write("                float inputs:roughness = 1\n");
+        writer.Write("                int inputs:useSpecularWorkflow = 0\n");
+        writer.Write("                token outputs:surface\n");
+        writer.Write("            }\n");
 
         if (material.Texture is not null)
         {
-            sb.Append("\n            def Shader \"stReader\"\n");
-            sb.Append("            {\n");
-            sb.Append("                uniform token info:id = \"UsdPrimvarReader_float2\"\n");
-            sb.Append("                token inputs:varname = \"st\"\n");
-            sb.Append("                float2 outputs:result\n");
-            sb.Append("            }\n");
+            writer.Write("\n            def Shader \"stReader\"\n");
+            writer.Write("            {\n");
+            writer.Write("                uniform token info:id = \"UsdPrimvarReader_float2\"\n");
+            writer.Write("                token inputs:varname = \"st\"\n");
+            writer.Write("                float2 outputs:result\n");
+            writer.Write("            }\n");
 
-            sb.Append("\n            def Shader \"diffuseTexture\"\n");
-            sb.Append("            {\n");
-            sb.Append("                uniform token info:id = \"UsdUVTexture\"\n");
-            sb.Append($"                asset inputs:file = @{material.Texture}@\n");
-            sb.Append($"                float2 inputs:st.connect = <{basePath}/stReader.outputs:result>\n");
-            sb.Append("                float3 outputs:rgb\n");
-            sb.Append("            }\n");
+            writer.Write("\n            def Shader \"diffuseTexture\"\n");
+            writer.Write("            {\n");
+            writer.Write("                uniform token info:id = \"UsdUVTexture\"\n");
+            writer.Write($"                asset inputs:file = @{material.Texture}@\n");
+            writer.Write($"                float2 inputs:st.connect = <{basePath}/stReader.outputs:result>\n");
+            writer.Write("                float3 outputs:rgb\n");
+            writer.Write("            }\n");
         }
 
-        sb.Append("        }\n");
+        writer.Write("        }\n");
     }
 
     private static Vector3 ComputeFaceNormal(ObjModel obj, ObjFace face)
@@ -305,46 +314,46 @@ public static class UsdzConverter
         return Vector3.UnitY;
     }
 
-    private static string FormatInts(IReadOnlyList<int> values)
+    private static void WriteInts(TextWriter writer, IReadOnlyList<int> values)
     {
-        var sb = new StringBuilder("[");
+        writer.Write('[');
         for (var i = 0; i < values.Count; i++)
         {
             if (i > 0)
             {
-                sb.Append(", ");
+                writer.Write(", ");
             }
-            sb.Append(values[i].ToString(CultureInfo.InvariantCulture));
+            writer.Write(values[i].ToString(CultureInfo.InvariantCulture));
         }
-        return sb.Append(']').ToString();
+        writer.Write(']');
     }
 
-    private static string FormatVec3(IReadOnlyList<Vector3> values)
+    private static void WriteVec3(TextWriter writer, IReadOnlyList<Vector3> values)
     {
-        var sb = new StringBuilder("[");
+        writer.Write('[');
         for (var i = 0; i < values.Count; i++)
         {
             if (i > 0)
             {
-                sb.Append(", ");
+                writer.Write(", ");
             }
-            sb.Append($"({F(values[i].X)}, {F(values[i].Y)}, {F(values[i].Z)})");
+            writer.Write($"({F(values[i].X)}, {F(values[i].Y)}, {F(values[i].Z)})");
         }
-        return sb.Append(']').ToString();
+        writer.Write(']');
     }
 
-    private static string FormatVec2(IReadOnlyList<Vector2> values)
+    private static void WriteVec2(TextWriter writer, IReadOnlyList<Vector2> values)
     {
-        var sb = new StringBuilder("[");
+        writer.Write('[');
         for (var i = 0; i < values.Count; i++)
         {
             if (i > 0)
             {
-                sb.Append(", ");
+                writer.Write(", ");
             }
-            sb.Append($"({F(values[i].X)}, {F(values[i].Y)})");
+            writer.Write($"({F(values[i].X)}, {F(values[i].Y)})");
         }
-        return sb.Append(']').ToString();
+        writer.Write(']');
     }
 
     private static string FormatColor(Vector3 color) => $"({F(color.X)}, {F(color.Y)}, {F(color.Z)})";
@@ -428,7 +437,9 @@ public static class UsdzConverter
         }
     }
 
-    private sealed record UsdzEntry(string Name, byte[] Data);
+    private sealed record UsdzEntry(string Name, string SourcePath);
+
+    private readonly record struct UsdzEntryInfo(byte[] NameBytes, uint Crc, long Length, long LocalOffset);
 
     // Minimal writer for the "stored" (uncompressed) zip flavour required by USDZ: every file's
     // data must begin on a 64-byte boundary, which we achieve by padding each local header's
@@ -444,21 +455,21 @@ public static class UsdzConverter
             using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
             using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
 
-            var nameBytes = new byte[entries.Count][];
-            var crcs = new uint[entries.Count];
-            var localOffsets = new long[entries.Count];
+            var infos = new UsdzEntryInfo[entries.Count];
 
             using (memory?.Step("write USDZ local file entries"))
             {
                 for (var i = 0; i < entries.Count; i++)
                 {
-                    nameBytes[i] = Encoding.UTF8.GetBytes(entries[i].Name);
-                    crcs[i] = Crc32(entries[i].Data);
-                    localOffsets[i] = stream.Position;
+                    var entry = entries[i];
+                    var nameBytes = Encoding.UTF8.GetBytes(entry.Name);
+                    var length = new FileInfo(entry.SourcePath).Length;
+                    var crc = Crc32(entry.SourcePath);
+                    var localOffset = stream.Position;
 
                     // data offset = header (30) + file name + extra field; pad the extra field so it
                     // lands on a 64-byte boundary.
-                    var beforeExtra = stream.Position + 30 + nameBytes[i].Length;
+                    var beforeExtra = stream.Position + 30 + nameBytes.Length;
                     var padding = (int)((Alignment - (beforeExtra % Alignment)) % Alignment);
 
                     writer.Write(0x04034b50u);                  // local file header signature
@@ -467,17 +478,22 @@ public static class UsdzConverter
                     writer.Write((ushort)0);                    // compression method (stored)
                     writer.Write((ushort)0);                    // last mod file time
                     writer.Write((ushort)0);                    // last mod file date
-                    writer.Write(crcs[i]);                      // crc-32
-                    writer.Write((uint)entries[i].Data.Length); // compressed size
-                    writer.Write((uint)entries[i].Data.Length); // uncompressed size
-                    writer.Write((ushort)nameBytes[i].Length);  // file name length
+                    writer.Write(crc);                          // crc-32
+                    writer.Write((uint)length);                 // compressed size
+                    writer.Write((uint)length);                 // uncompressed size
+                    writer.Write((ushort)nameBytes.Length);     // file name length
                     writer.Write((ushort)padding);              // extra field length (alignment pad)
-                    writer.Write(nameBytes[i]);
+                    writer.Write(nameBytes);
                     if (padding > 0)
                     {
                         writer.Write(new byte[padding]);
                     }
-                    writer.Write(entries[i].Data);
+                    using (var source = new FileStream(entry.SourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    {
+                        source.CopyTo(stream);
+                    }
+
+                    infos[i] = new UsdzEntryInfo(nameBytes, crc, length, localOffset);
                 }
             }
 
@@ -486,6 +502,7 @@ public static class UsdzConverter
             {
                 for (var i = 0; i < entries.Count; i++)
                 {
+                    var info = infos[i];
                     writer.Write(0x02014b50u);                  // central directory header signature
                     writer.Write((ushort)20);                   // version made by
                     writer.Write((ushort)20);                   // version needed to extract
@@ -493,17 +510,17 @@ public static class UsdzConverter
                     writer.Write((ushort)0);                    // compression method (stored)
                     writer.Write((ushort)0);                    // last mod file time
                     writer.Write((ushort)0);                    // last mod file date
-                    writer.Write(crcs[i]);                      // crc-32
-                    writer.Write((uint)entries[i].Data.Length); // compressed size
-                    writer.Write((uint)entries[i].Data.Length); // uncompressed size
-                    writer.Write((ushort)nameBytes[i].Length);  // file name length
+                    writer.Write(info.Crc);                     // crc-32
+                    writer.Write((uint)info.Length);            // compressed size
+                    writer.Write((uint)info.Length);            // uncompressed size
+                    writer.Write((ushort)info.NameBytes.Length);// file name length
                     writer.Write((ushort)0);                    // extra field length
                     writer.Write((ushort)0);                    // file comment length
                     writer.Write((ushort)0);                    // disk number start
                     writer.Write((ushort)0);                    // internal file attributes
                     writer.Write((uint)0);                      // external file attributes
-                    writer.Write((uint)localOffsets[i]);        // relative offset of local header
-                    writer.Write(nameBytes[i]);
+                    writer.Write((uint)info.LocalOffset);       // relative offset of local header
+                    writer.Write(info.NameBytes);
                 }
             }
             var centralEnd = stream.Position;
@@ -518,12 +535,18 @@ public static class UsdzConverter
             writer.Write((ushort)0);                        // comment length
         }
 
-        private static uint Crc32(byte[] data)
+        private static uint Crc32(string path)
         {
             var crc = 0xFFFFFFFFu;
-            foreach (var b in data)
+            Span<byte> buffer = stackalloc byte[8192];
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            int bytesRead;
+            while ((bytesRead = stream.Read(buffer)) > 0)
             {
-                crc = CrcTable[(crc ^ b) & 0xFF] ^ (crc >> 8);
+                foreach (var b in buffer[..bytesRead])
+                {
+                    crc = CrcTable[(crc ^ b) & 0xFF] ^ (crc >> 8);
+                }
             }
             return crc ^ 0xFFFFFFFFu;
         }
