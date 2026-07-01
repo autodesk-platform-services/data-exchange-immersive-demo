@@ -2,7 +2,16 @@
 // downloadable GLB and USDZ artifacts. Every request forwards the same 3-legged APS token
 // as a bearer token; the service uses it both to authorize and to download the exchange.
 
-const BASE_URL = "https://data-exchange-viewing-service.azurewebsites.net";
+const DEFAULT_BASE_URL = "https://data-exchange-viewing-service.azurewebsites.net";
+
+// The backend can be overridden with a `?service=<url>` query parameter, e.g. for pointing
+// at a local or staging deployment.
+function resolveBaseUrl(): string {
+  const fromQuery = new URL(window.location.href).searchParams.get("service");
+  return (fromQuery ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+}
+
+const BASE_URL = resolveBaseUrl();
 
 export interface ConversionStatus {
   status: "running" | "completed" | "failed";
