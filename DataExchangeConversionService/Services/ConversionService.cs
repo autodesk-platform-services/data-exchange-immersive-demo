@@ -50,11 +50,14 @@ public sealed class ConversionService : IConversionService
             : null;
     }
 
-    public void StartObjConversion(string exchangeUrn, string bearerToken)
+    public bool StartObjConversion(string exchangeUrn, string bearerToken)
     {
         var outputFolder = GetExchangeOutputFolder(exchangeUrn);
-        // Start each run from a clean slate.
-        DeleteFolderIfExists(outputFolder);
+        if (Directory.Exists(outputFolder))
+        {
+            return false;
+        }
+
         Directory.CreateDirectory(outputFolder);
 
         // Mark the conversion as running, then run it in the background.
@@ -66,6 +69,7 @@ public sealed class ConversionService : IConversionService
         };
         WriteMetadata(outputFolder, metadata);
         _ = Task.Run(() => RunObjConversionAsync(exchangeUrn, bearerToken, outputFolder, metadata));
+        return true;
     }
 
     public void DeleteObjConversion(string exchangeUrn)

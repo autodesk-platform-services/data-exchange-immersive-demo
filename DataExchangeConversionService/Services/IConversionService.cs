@@ -10,8 +10,9 @@ public interface IConversionService
     // Current status of the exchange, or null if no conversion has been started.
     ConversionMetadata? GetStatus(string exchangeUrn);
 
-    // Starts an OBJ conversion in the background and returns immediately.
-    void StartObjConversion(string exchangeUrn, string bearerToken);
+    // Starts an OBJ conversion in the background and returns immediately. Returns false without
+    // starting anything if a conversion for this exchange already exists.
+    bool StartObjConversion(string exchangeUrn, string bearerToken);
 
     // Deletes the results of a conversion, but does not affect the original data exchange or its contents.
     void DeleteObjConversion(string exchangeUrn);

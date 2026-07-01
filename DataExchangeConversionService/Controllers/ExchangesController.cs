@@ -38,7 +38,16 @@ public sealed class ExchangesController : ControllerBase
         }
 
         TryGetBearerToken(out var bearerToken);
-        _conversionService.StartObjConversion(exchangeUrn, bearerToken);
+        if (!_conversionService.StartObjConversion(exchangeUrn, bearerToken))
+        {
+            return Conflict(new ProblemDetails
+            {
+                Title = "Conversion already in progress",
+                Detail = "This exchange is already being processed. Delete the current conversion first if you want to start it again.",
+                Status = StatusCodes.Status409Conflict
+            });
+        }
+
         return Accepted($"/api/exchanges/{exchangeUrn}");
     }
 

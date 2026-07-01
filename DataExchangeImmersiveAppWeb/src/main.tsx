@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { getStoredToken, handleCallback, login, logout } from "./auth.ts";
 import { getExchanges, getHubs, getProjects, type Exchange, type Hub, type Project } from "./aps.ts";
 import {
+  deleteConversion,
   fetchArtifactBlob,
   fetchArtifactText,
   findArtifact,
@@ -333,6 +334,11 @@ function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
     setStatus({ status: "running", artifacts: [] });
   }, [token, urn]);
 
+  const remove = useCallback(async () => {
+    await deleteConversion(token, urn);
+    setStatus(null);
+  }, [token, urn]);
+
   return (
     <main className="main-pane">
       <header className="toolbar">
@@ -348,9 +354,13 @@ function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
           ))}
         </div>
         <div className="conversion">
-          <button onClick={() => void convert()} disabled={status?.status === "running"}>
-            {status?.status === "running" ? "Converting…" : "Convert"}
-          </button>
+          {status ? (
+            <button onClick={() => void remove()} disabled={status.status === "running"}>
+              {status.status === "running" ? "Converting…" : "Delete"}
+            </button>
+          ) : (
+            <button onClick={() => void convert()}>Convert</button>
+          )}
           {status && <span className={`status ${status.status}`}>{status.status}</span>}
           {status?.error && <span className="error">{status.error}</span>}
         </div>

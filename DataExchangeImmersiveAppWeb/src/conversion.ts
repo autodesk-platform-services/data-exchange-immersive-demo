@@ -39,6 +39,17 @@ export async function startConversion(token: string, urn: string): Promise<void>
   }
 }
 
+// Deletes the results of a previous conversion so a new one can be started for this exchange.
+export async function deleteConversion(token: string, urn: string): Promise<void> {
+  const response = await fetch(exchangeEndpoint(urn), {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to delete conversion: ${response.status} ${await response.text()}`);
+  }
+}
+
 // Returns the current conversion status, or null if no conversion has been started for this exchange.
 export async function getStatus(token: string, urn: string): Promise<ConversionStatus | null> {
   const response = await fetch(exchangeEndpoint(urn), { headers: authHeaders(token) });
