@@ -18,31 +18,58 @@ public static class UsdzConverter
 
     // Converts the given OBJ file into a USDZ package. Any MTL libraries referenced by the OBJ
     // (and resolved relative to the OBJ's folder) drive the generated materials.
-    public static void ConvertObjToUsdz(string objPath, string usdzPath)
+    public static void ConvertObjToUsdz(string objPath, string usdzPath, ILogger? logger = null)
     {
+        var memory = logger is null ? null : new MemoryTelemetry(logger, $"USDZ conversion");
         var baseFolder = Path.GetDirectoryName(Path.GetFullPath(objPath)) ?? ".";
-        var obj = ObjModel.Load(objPath);
+        ObjModel obj;
+        using (memory?.Step("load OBJ and MTL for USDZ"))
+        {
+            obj = ObjModel.Load(objPath);
+        }
         var modelName = Sanitize(Path.GetFileNameWithoutExtension(objPath), "Model");
 
         // Group faces by material so each becomes a separate USD Mesh, mirroring the per-material
         // primitives produced by the glTF converter.
-        var groups = GroupFacesByMaterial(obj);
+        List<MeshGroup> groups;
+        using (memory?.Step("group OBJ faces by material for USDZ"))
+        {
+            groups = GroupFacesByMaterial(obj);
+        }
 
         // Resolve the distinct materials used and register the textures they reference.
         var textures = new TextureRegistry(baseFolder);
-        var materials = ResolveMaterials(groups, obj, textures);
+        Dictionary<string, UsdMaterial> materials;
+        using (memory?.Step("resolve USDZ materials and texture references"))
+        {
+            materials = ResolveMaterials(groups, obj, textures);
+        }
 
-        var usda = BuildUsda(obj, groups, materials, modelName);
+        string usda;
+        using (memory?.Step("build USDA text layer"))
+        {
+            usda = BuildUsda(obj, groups, materials, modelName);
+        }
 
         // The default layer must be the archive's first entry.
         var layerName = modelName + ".usda";
-        var entries = new List<UsdzEntry> { new(layerName, Encoding.UTF8.GetBytes(usda)) };
-        foreach (var (packageName, sourcePath) in textures.Files)
+        List<UsdzEntry> entries;
+        using (memory?.Step("buffer USDA layer and textures for USDZ archive"))
         {
-            entries.Add(new UsdzEntry(packageName, File.ReadAllBytes(sourcePath)));
+            entries = [new(layerName, Encoding.UTF8.GetBytes(usda))];
+            foreach (var (packageName, sourcePath) in textures.Files)
+            {
+                using (memory?.Step($"read USDZ texture {packageName}"))
+                {
+                    entries.Add(new UsdzEntry(packageName, File.ReadAllBytes(sourcePath)));
+                }
+            }
         }
 
-        UsdzArchive.Write(usdzPath, entries);
+        using (memory?.Step("write USDZ archive"))
+        {
+            UsdzArchive.Write(usdzPath, entries, logger);
+        }
     }
 
     private static List<MeshGroup> GroupFacesByMaterial(ObjModel obj)
@@ -411,8 +438,9 @@ public static class UsdzConverter
         private const int Alignment = 64;
         private static readonly uint[] CrcTable = BuildCrcTable();
 
-        public static void Write(string path, IReadOnlyList<UsdzEntry> entries)
+        public static void Write(string path, IReadOnlyList<UsdzEntry> entries, ILogger? logger = null)
         {
+            var memory = logger is null ? null : new MemoryTelemetry(logger, $"USDZ archive");
             using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
             using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
 
@@ -420,57 +448,63 @@ public static class UsdzConverter
             var crcs = new uint[entries.Count];
             var localOffsets = new long[entries.Count];
 
-            for (var i = 0; i < entries.Count; i++)
+            using (memory?.Step("write USDZ local file entries"))
             {
-                nameBytes[i] = Encoding.UTF8.GetBytes(entries[i].Name);
-                crcs[i] = Crc32(entries[i].Data);
-                localOffsets[i] = stream.Position;
-
-                // data offset = header (30) + file name + extra field; pad the extra field so it
-                // lands on a 64-byte boundary.
-                var beforeExtra = stream.Position + 30 + nameBytes[i].Length;
-                var padding = (int)((Alignment - (beforeExtra % Alignment)) % Alignment);
-
-                writer.Write(0x04034b50u);                  // local file header signature
-                writer.Write((ushort)20);                   // version needed to extract
-                writer.Write((ushort)0);                    // general purpose bit flag
-                writer.Write((ushort)0);                    // compression method (stored)
-                writer.Write((ushort)0);                    // last mod file time
-                writer.Write((ushort)0);                    // last mod file date
-                writer.Write(crcs[i]);                      // crc-32
-                writer.Write((uint)entries[i].Data.Length); // compressed size
-                writer.Write((uint)entries[i].Data.Length); // uncompressed size
-                writer.Write((ushort)nameBytes[i].Length);  // file name length
-                writer.Write((ushort)padding);              // extra field length (alignment pad)
-                writer.Write(nameBytes[i]);
-                if (padding > 0)
+                for (var i = 0; i < entries.Count; i++)
                 {
-                    writer.Write(new byte[padding]);
+                    nameBytes[i] = Encoding.UTF8.GetBytes(entries[i].Name);
+                    crcs[i] = Crc32(entries[i].Data);
+                    localOffsets[i] = stream.Position;
+
+                    // data offset = header (30) + file name + extra field; pad the extra field so it
+                    // lands on a 64-byte boundary.
+                    var beforeExtra = stream.Position + 30 + nameBytes[i].Length;
+                    var padding = (int)((Alignment - (beforeExtra % Alignment)) % Alignment);
+
+                    writer.Write(0x04034b50u);                  // local file header signature
+                    writer.Write((ushort)20);                   // version needed to extract
+                    writer.Write((ushort)0);                    // general purpose bit flag
+                    writer.Write((ushort)0);                    // compression method (stored)
+                    writer.Write((ushort)0);                    // last mod file time
+                    writer.Write((ushort)0);                    // last mod file date
+                    writer.Write(crcs[i]);                      // crc-32
+                    writer.Write((uint)entries[i].Data.Length); // compressed size
+                    writer.Write((uint)entries[i].Data.Length); // uncompressed size
+                    writer.Write((ushort)nameBytes[i].Length);  // file name length
+                    writer.Write((ushort)padding);              // extra field length (alignment pad)
+                    writer.Write(nameBytes[i]);
+                    if (padding > 0)
+                    {
+                        writer.Write(new byte[padding]);
+                    }
+                    writer.Write(entries[i].Data);
                 }
-                writer.Write(entries[i].Data);
             }
 
             var centralStart = stream.Position;
-            for (var i = 0; i < entries.Count; i++)
+            using (memory?.Step("write USDZ central directory"))
             {
-                writer.Write(0x02014b50u);                  // central directory header signature
-                writer.Write((ushort)20);                   // version made by
-                writer.Write((ushort)20);                   // version needed to extract
-                writer.Write((ushort)0);                    // general purpose bit flag
-                writer.Write((ushort)0);                    // compression method (stored)
-                writer.Write((ushort)0);                    // last mod file time
-                writer.Write((ushort)0);                    // last mod file date
-                writer.Write(crcs[i]);                      // crc-32
-                writer.Write((uint)entries[i].Data.Length); // compressed size
-                writer.Write((uint)entries[i].Data.Length); // uncompressed size
-                writer.Write((ushort)nameBytes[i].Length);  // file name length
-                writer.Write((ushort)0);                    // extra field length
-                writer.Write((ushort)0);                    // file comment length
-                writer.Write((ushort)0);                    // disk number start
-                writer.Write((ushort)0);                    // internal file attributes
-                writer.Write((uint)0);                      // external file attributes
-                writer.Write((uint)localOffsets[i]);        // relative offset of local header
-                writer.Write(nameBytes[i]);
+                for (var i = 0; i < entries.Count; i++)
+                {
+                    writer.Write(0x02014b50u);                  // central directory header signature
+                    writer.Write((ushort)20);                   // version made by
+                    writer.Write((ushort)20);                   // version needed to extract
+                    writer.Write((ushort)0);                    // general purpose bit flag
+                    writer.Write((ushort)0);                    // compression method (stored)
+                    writer.Write((ushort)0);                    // last mod file time
+                    writer.Write((ushort)0);                    // last mod file date
+                    writer.Write(crcs[i]);                      // crc-32
+                    writer.Write((uint)entries[i].Data.Length); // compressed size
+                    writer.Write((uint)entries[i].Data.Length); // uncompressed size
+                    writer.Write((ushort)nameBytes[i].Length);  // file name length
+                    writer.Write((ushort)0);                    // extra field length
+                    writer.Write((ushort)0);                    // file comment length
+                    writer.Write((ushort)0);                    // disk number start
+                    writer.Write((ushort)0);                    // internal file attributes
+                    writer.Write((uint)0);                      // external file attributes
+                    writer.Write((uint)localOffsets[i]);        // relative offset of local header
+                    writer.Write(nameBytes[i]);
+                }
             }
             var centralEnd = stream.Position;
 

@@ -23,10 +23,15 @@ public static class GltfConverter
 {
     // Converts the given OBJ file into a GLB file. Any MTL libraries referenced by the OBJ
     // (and resolved relative to the OBJ's folder) are used to assign per-primitive materials.
-    public static void ConvertObjToGlb(string objPath, string glbPath)
+    public static void ConvertObjToGlb(string objPath, string glbPath, ILogger? logger = null)
     {
+        var memory = logger is null ? null : new MemoryTelemetry(logger, $"GLB conversion");
         var baseFolder = Path.GetDirectoryName(Path.GetFullPath(objPath)) ?? ".";
-        var obj = ObjModel.Load(objPath);
+        ObjModel obj;
+        using (memory?.Step("load OBJ and MTL for GLB"))
+        {
+            obj = ObjModel.Load(objPath);
+        }
 
         var materialBuilders = new Dictionary<string, MaterialBuilder>(StringComparer.OrdinalIgnoreCase);
         var defaultMaterial = new MaterialBuilder("default")
@@ -38,41 +43,51 @@ public static class GltfConverter
         var mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(
             Path.GetFileNameWithoutExtension(objPath));
 
-        foreach (var face in obj.Faces)
+        using (memory?.Step("build SharpGLTF mesh from OBJ faces"))
         {
-            if (face.Corners.Count < 3)
+            foreach (var face in obj.Faces)
             {
-                continue;
-            }
-
-            var material = ResolveMaterial(face.Material, obj.Materials, materialBuilders, defaultMaterial, baseFolder);
-            var primitive = mesh.UsePrimitive(material);
-
-            // Fan-triangulate the (possibly n-gon) face.
-            for (var i = 1; i < face.Corners.Count - 1; i++)
-            {
-                var a = BuildVertex(obj, face.Corners[0]);
-                var b = BuildVertex(obj, face.Corners[i]);
-                var c = BuildVertex(obj, face.Corners[i + 1]);
-
-                // Supply a flat face normal whenever the OBJ omitted explicit vertex normals.
-                if (!face.Corners[0].HasNormal || !face.Corners[i].HasNormal || !face.Corners[i + 1].HasNormal)
+                if (face.Corners.Count < 3)
                 {
-                    var faceNormal = ComputeNormal(a.Geometry.Position, b.Geometry.Position, c.Geometry.Position);
-                    a = WithNormal(a, faceNormal);
-                    b = WithNormal(b, faceNormal);
-                    c = WithNormal(c, faceNormal);
+                    continue;
                 }
 
-                primitive.AddTriangle(a, b, c);
+                var material = ResolveMaterial(face.Material, obj.Materials, materialBuilders, defaultMaterial, baseFolder);
+                var primitive = mesh.UsePrimitive(material);
+
+                // Fan-triangulate the (possibly n-gon) face.
+                for (var i = 1; i < face.Corners.Count - 1; i++)
+                {
+                    var a = BuildVertex(obj, face.Corners[0]);
+                    var b = BuildVertex(obj, face.Corners[i]);
+                    var c = BuildVertex(obj, face.Corners[i + 1]);
+
+                    // Supply a flat face normal whenever the OBJ omitted explicit vertex normals.
+                    if (!face.Corners[0].HasNormal || !face.Corners[i].HasNormal || !face.Corners[i + 1].HasNormal)
+                    {
+                        var faceNormal = ComputeNormal(a.Geometry.Position, b.Geometry.Position, c.Geometry.Position);
+                        a = WithNormal(a, faceNormal);
+                        b = WithNormal(b, faceNormal);
+                        c = WithNormal(c, faceNormal);
+                    }
+
+                    primitive.AddTriangle(a, b, c);
+                }
             }
         }
 
-        var scene = new SceneBuilder();
-        scene.AddRigidMesh(mesh, Matrix4x4.Identity);
+        SceneBuilder scene;
+        using (memory?.Step("create SharpGLTF scene"))
+        {
+            scene = new SceneBuilder();
+            scene.AddRigidMesh(mesh, Matrix4x4.Identity);
+        }
 
-        var model = scene.ToGltf2();
-        model.SaveGLB(glbPath);
+        using (memory?.Step("serialize GLB file"))
+        {
+            var model = scene.ToGltf2();
+            model.SaveGLB(glbPath);
+        }
     }
 
     private static VERTEX BuildVertex(ObjModel obj, ObjCorner corner)

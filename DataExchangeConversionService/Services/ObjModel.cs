@@ -38,15 +38,24 @@ public sealed class ObjModel
         return model;
     }
 
-    // Rewrites the OBJ in place, rotating its geometry from the Z-up convention emitted by the
-    // Data Exchange geometry extraction to the Y-up convention that OBJ/glTF/USD viewers assume.
+    // Preserves the original OBJ under a separate name, then writes a copy with geometry rotated
+    // from the Z-up convention emitted by the Data Exchange geometry extraction to the Y-up
+    // convention that OBJ/glTF/USD viewers assume.
     // Only vertex positions ("v") and normals ("vn") are rotated; every other line (texture
     // coordinates, faces, material directives, comments, blank lines) is copied through verbatim.
     public static void ConvertZUpToYUp(string objPath)
     {
-        var tempPath = objPath + ".tmp";
-        using (var reader = new StreamReader(objPath))
-        using (var writer = new StreamWriter(tempPath))
+        var objFullPath = Path.GetFullPath(objPath);
+        var baseFolder = Path.GetDirectoryName(objFullPath) ?? ".";
+        var originalPath = Path.Combine(
+            baseFolder,
+            $"{Path.GetFileNameWithoutExtension(objFullPath)}.original{Path.GetExtension(objFullPath)}");
+
+        DeleteFileIfExists(originalPath);
+        File.Move(objFullPath, originalPath);
+
+        using (var reader = new StreamReader(originalPath))
+        using (var writer = new StreamWriter(objFullPath))
         {
             string? line;
             while ((line = reader.ReadLine()) is not null)
@@ -54,8 +63,14 @@ public sealed class ObjModel
                 writer.WriteLine(RotateZUpLine(line));
             }
         }
+    }
 
-        File.Move(tempPath, objPath, overwrite: true);
+    private static void DeleteFileIfExists(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
     }
 
     // Applies a -90° rotation about the X axis to a single "v"/"vn" line, mapping (x, y, z) to
