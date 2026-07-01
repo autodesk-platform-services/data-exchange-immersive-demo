@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "start": "bun index.ts",
     "dev": "bun --hot index.ts"
   },
   "dependencies": {
