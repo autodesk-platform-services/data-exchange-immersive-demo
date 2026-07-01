@@ -4,6 +4,7 @@ import { getStoredToken, handleCallback, login, logout } from "./auth.ts";
 import { getExchanges, getHubs, getProjects, type Exchange, type Hub, type Project } from "./aps.ts";
 import {
   fetchArtifactBlob,
+  fetchArtifactText,
   findArtifact,
   getStatus,
   startConversion,
@@ -13,7 +14,16 @@ import { initViewer, loadExchange } from "./viewer.ts";
 
 import "./styles.css";
 
-type Tab = "viewer" | "glb" | "usdz";
+const LOGO_URL = "https://cdn.autodesk.io/logo/white/stacked.png";
+
+type Tab = "viewer" | "glb" | "usdz" | "logs";
+
+const TAB_LABELS: Record<Tab, string> = {
+  viewer: "Viewer",
+  glb: "GLB",
+  usdz: "USDZ",
+  logs: "Logs",
+};
 
 // ---------------------------------------------------------------------------
 // Login screen
@@ -22,6 +32,7 @@ type Tab = "viewer" | "glb" | "usdz";
 function LoginPage() {
   return (
     <div className="login">
+      <img className="login-logo" src={LOGO_URL} alt="Autodesk" />
       <h1>Data Exchange Immersive Demo</h1>
       <button onClick={() => void login()}>Login with Autodesk</button>
     </div>
@@ -81,8 +92,8 @@ function HubNode({
 
   return (
     <div className="tree-node">
-      <div className="tree-label" onClick={toggle}>
-        {open ? "▼" : "▶"} {hub.name}
+      <div className={`tree-label ${open ? "open" : ""}`} onClick={toggle}>
+        {hub.name}
       </div>
       {open &&
         (projects ?? []).map((project) => (
@@ -121,8 +132,8 @@ function ProjectNode({
 
   return (
     <div className="tree-node indent">
-      <div className="tree-label" onClick={toggle}>
-        {open ? "▼" : "▶"} {project.name}
+      <div className={`tree-label ${open ? "open" : ""}`} onClick={toggle}>
+        {project.name}
       </div>
       {open &&
         (exchanges ?? []).map((exchange) => (
@@ -131,7 +142,7 @@ function ProjectNode({
             className={`tree-leaf indent ${selected?.id === exchange.id ? "selected" : ""}`}
             onClick={() => onSelect(exchange)}
           >
-            ○ {exchange.name}
+            {exchange.name}
           </div>
         ))}
     </div>
@@ -233,6 +244,63 @@ function ArtifactTab({
 }
 
 // ---------------------------------------------------------------------------
+// Logs tab: streams log.txt, which is readable even while a conversion runs
+// ---------------------------------------------------------------------------
+
+function LogsTab({
+  token,
+  urn,
+  status,
+}: {
+  token: string;
+  urn: string;
+  status: ConversionStatus | null;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // `status` is a fresh object on every poll (see MainPane), so this effect re-fetches the log
+  // on the same 3s cadence as the status poll while running, and once more when it settles.
+  useEffect(() => {
+    if (!status) return;
+    let cancelled = false;
+    fetchArtifactText(token, urn, "log.txt").then(
+      (contents) => {
+        if (!cancelled) {
+          setText(contents);
+          setError(null);
+        }
+      },
+      (err) => {
+        if (!cancelled) setError(String(err));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [token, urn, status]);
+
+  if (!status) {
+    return <div className="tab-body placeholder">Run a conversion to view logs.</div>;
+  }
+  if (error && !text) {
+    return (
+      <div className="tab-body placeholder">
+        {status.status === "running" ? "Waiting for logs…" : <span className="error">{error}</span>}
+      </div>
+    );
+  }
+  if (!text) {
+    return <div className="tab-body placeholder">Loading logs…</div>;
+  }
+  return (
+    <div className="tab-body">
+      <pre className="log-view">{text}</pre>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main pane: tabs + conversion controls for the selected exchange
 // ---------------------------------------------------------------------------
 
@@ -269,13 +337,13 @@ function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
     <main className="main-pane">
       <header className="toolbar">
         <div className="tabs">
-          {(["viewer", "glb", "usdz"] as Tab[]).map((t) => (
+          {(["viewer", "glb", "usdz", "logs"] as Tab[]).map((t) => (
             <button
               key={t}
               className={tab === t ? "active" : ""}
               onClick={() => setTab(t)}
             >
-              {t === "viewer" ? "Viewer" : t.toUpperCase()}
+              {TAB_LABELS[t]}
             </button>
           ))}
         </div>
@@ -316,6 +384,7 @@ function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
           )}
         />
       )}
+      {tab === "logs" && <LogsTab token={token} urn={urn} status={status} />}
     </main>
   );
 }
@@ -330,7 +399,10 @@ function App({ token }: { token: string }) {
   return (
     <div className="app">
       <nav className="topbar">
-        <span>Data Exchange Immersive Demo</span>
+        <div className="brand">
+          <img className="brand-logo" src={LOGO_URL} alt="Autodesk" />
+          <span>Data Exchange Immersive Demo</span>
+        </div>
         <button onClick={logout}>Logout</button>
       </nav>
       <div className="layout">

@@ -51,6 +51,16 @@ export async function getStatus(token: string, urn: string): Promise<ConversionS
   return (await response.json()) as ConversionStatus;
 }
 
+async function fetchArtifact(token: string, urn: string, fileName: string): Promise<Response> {
+  const response = await fetch(`${exchangeEndpoint(urn)}/${encodeURIComponent(fileName)}`, {
+    headers: authHeaders(token),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch artifact ${fileName}: ${response.status}`);
+  }
+  return response;
+}
+
 // Downloads a single artifact and returns an object URL. The <model-viewer>/<model> `src`
 // attributes cannot send an Authorization header, so we fetch the bytes here and hand the
 // elements a blob URL instead. Callers must revokeObjectUrl() the result when done.
@@ -59,13 +69,16 @@ export async function fetchArtifactBlob(
   urn: string,
   fileName: string,
 ): Promise<string> {
-  const response = await fetch(`${exchangeEndpoint(urn)}/${encodeURIComponent(fileName)}`, {
-    headers: authHeaders(token),
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to fetch artifact ${fileName}: ${response.status}`);
-  }
-  return URL.createObjectURL(await response.blob());
+  return URL.createObjectURL(await (await fetchArtifact(token, urn, fileName)).blob());
+}
+
+// Downloads a text artifact (e.g. log.txt) and returns its contents as a string.
+export async function fetchArtifactText(
+  token: string,
+  urn: string,
+  fileName: string,
+): Promise<string> {
+  return (await fetchArtifact(token, urn, fileName)).text();
 }
 
 // Picks the first artifact with the given extension (e.g. ".glb", ".usdz"), or undefined.
