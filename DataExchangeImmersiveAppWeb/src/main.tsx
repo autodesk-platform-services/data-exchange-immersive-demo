@@ -40,6 +40,10 @@ function LoginPage() {
   );
 }
 
+function Spinner() {
+  return <span className="spinner" />;
+}
+
 // ---------------------------------------------------------------------------
 // Sidebar: lazily-expanded Hub ▸ Project ▸ Exchange tree
 // ---------------------------------------------------------------------------
@@ -83,11 +87,22 @@ function HubNode({
 }) {
   const [open, setOpen] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const toggle = () => {
     setOpen((wasOpen) => !wasOpen);
     if (projects === null) {
-      getProjects(token, hub.id).then(setProjects, () => setProjects([]));
+      setLoading(true);
+      getProjects(token, hub.id).then(
+        (result) => {
+          setProjects(result);
+          setLoading(false);
+        },
+        () => {
+          setProjects([]);
+          setLoading(false);
+        },
+      );
     }
   };
 
@@ -96,6 +111,11 @@ function HubNode({
       <div className={`tree-label ${open ? "open" : ""}`} onClick={toggle}>
         {hub.name}
       </div>
+      {open && loading && (
+        <div className="tree-loading indent">
+          <Spinner /> Loading projects…
+        </div>
+      )}
       {open &&
         (projects ?? []).map((project) => (
           <ProjectNode
@@ -123,11 +143,22 @@ function ProjectNode({
 }) {
   const [open, setOpen] = useState(false);
   const [exchanges, setExchanges] = useState<Exchange[] | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const toggle = () => {
     setOpen((wasOpen) => !wasOpen);
     if (exchanges === null) {
-      getExchanges(token, project.id).then(setExchanges, () => setExchanges([]));
+      setLoading(true);
+      getExchanges(token, project.id).then(
+        (result) => {
+          setExchanges(result);
+          setLoading(false);
+        },
+        () => {
+          setExchanges([]);
+          setLoading(false);
+        },
+      );
     }
   };
 
@@ -136,6 +167,11 @@ function ProjectNode({
       <div className={`tree-label ${open ? "open" : ""}`} onClick={toggle}>
         {project.name}
       </div>
+      {open && loading && (
+        <div className="tree-loading indent">
+          <Spinner /> Loading exchanges…
+        </div>
+      )}
       {open &&
         (exchanges ?? []).map((exchange) => (
           <div
@@ -308,16 +344,28 @@ function LogsTab({
 function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
   const [tab, setTab] = useState<Tab>("viewer");
   const [status, setStatus] = useState<ConversionStatus | null>(null);
+  const [statusLoaded, setStatusLoaded] = useState(false);
 
   // The conversion/viewing service identifies an exchange by its URL-encoded lineage URN
   // (urn:adsk.wipprod:dm.lineage:...), i.e. the exchange's fileUrn — not the GraphQL exchange id.
   const urn = exchange.fileUrn;
 
   // As soon as an exchange is selected, check the viewing service for already-available artifacts.
+  // The GLB/USDZ/logs tabs and the convert/delete button stay disabled until this first check settles.
   useEffect(() => {
     setStatus(null);
+    setStatusLoaded(false);
     setTab("viewer");
-    getStatus(token, urn).then(setStatus, () => setStatus(null));
+    getStatus(token, urn).then(
+      (result) => {
+        setStatus(result);
+        setStatusLoaded(true);
+      },
+      () => {
+        setStatus(null);
+        setStatusLoaded(true);
+      },
+    );
   }, [token, urn]);
 
   // Poll while a conversion is running.
@@ -347,6 +395,7 @@ function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
             <button
               key={t}
               className={tab === t ? "active" : ""}
+              disabled={t !== "viewer" && !statusLoaded}
               onClick={() => setTab(t)}
             >
               {TAB_LABELS[t]}
@@ -355,11 +404,13 @@ function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
         </div>
         <div className="conversion">
           {status ? (
-            <button onClick={() => void remove()} disabled={status.status === "running"}>
+            <button className="secondary" onClick={() => void remove()} disabled={status.status === "running"}>
               {status.status === "running" ? "Converting…" : "Delete"}
             </button>
           ) : (
-            <button onClick={() => void convert()}>Convert</button>
+            <button onClick={() => void convert()} disabled={!statusLoaded}>
+              Convert
+            </button>
           )}
           {status && <span className={`status ${status.status}`}>{status.status}</span>}
           {status?.error && <span className="error">{status.error}</span>}
@@ -413,7 +464,7 @@ function App({ token }: { token: string }) {
           <img className="brand-logo" src={LOGO_URL} alt="Autodesk" />
           <span>Data Exchange Immersive Demo</span>
         </div>
-        <button onClick={logout}>Logout</button>
+        <button className="secondary" onClick={logout}>Logout</button>
       </nav>
       <div className="layout">
         <Sidebar token={token} selected={selected} onSelect={setSelected} />
