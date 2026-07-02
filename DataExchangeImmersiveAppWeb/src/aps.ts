@@ -60,7 +60,8 @@ export async function getHubs(token: string): Promise<Hub[]> {
     token,
     `query { hubs { results { id name } } }`,
   );
-  return data.hubs.results;
+  const hubs = data.hubs.results;
+  return hubs.filter((hub) => !hub.name.startsWith("Team Hub"));
 }
 
 export async function getProjects(token: string, hubId: string): Promise<Project[]> {

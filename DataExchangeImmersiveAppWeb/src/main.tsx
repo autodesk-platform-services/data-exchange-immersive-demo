@@ -27,35 +27,65 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Background: fixed, heavily blurred backdrop photo behind the whole app
+// ---------------------------------------------------------------------------
+
+function Backdrop() {
+  return <div className="backdrop" />;
+}
+
+// ---------------------------------------------------------------------------
 // Login screen
 // ---------------------------------------------------------------------------
 
 function LoginPage() {
   return (
     <div className="login">
-      <img className="login-logo" src={LOGO_URL} alt="Autodesk" />
-      <h1>Data Exchange Immersive Demo</h1>
-      <button onClick={() => void login()}>Login with Autodesk</button>
+      <div className="login-card">
+        <img className="login-logo" src={LOGO_URL} alt="Autodesk" />
+        <h1>Data Exchange Immersive Demo</h1>
+        <button onClick={() => void login()}>Login with Autodesk</button>
+      </div>
     </div>
   );
 }
 
 function Spinner() {
-  return <span className="spinner" />;
+  return (
+    <span className="spinner" aria-hidden="true">
+      {Array.from({ length: 8 }, (_, i) => (
+        <span
+          key={i}
+          className="spinner-blade"
+          style={{ transform: `rotate(${i * 45}deg)`, animationDelay: `${(i * 0.125 - 1).toFixed(3)}s` }}
+        />
+      ))}
+    </span>
+  );
+}
+
+// A single chevron glyph (pointing right) reused — via rotation — for the hub disclosure
+// indicator, the exchange-row trailing arrow, and the back button, so all three match.
+function Chevron({ className = "" }: { className?: string }) {
+  return (
+    <svg className={`chevron-icon ${className}`} viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <polyline points="9 6 15 12 9 18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar: lazily-expanded Hub ▸ Project ▸ Exchange tree
+// Sidebar: app header + lazily-expanded Hub ▸ Project tree
 // ---------------------------------------------------------------------------
 
 function Sidebar({
   token,
-  selected,
-  onSelect,
+  selectedProject,
+  onSelectProject,
 }: {
   token: string;
-  selected: Exchange | null;
-  onSelect: (exchange: Exchange) => void;
+  selectedProject: Project | null;
+  onSelectProject: (project: Project) => void;
 }) {
   const [hubs, setHubs] = useState<Hub[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -66,10 +96,24 @@ function Sidebar({
 
   return (
     <aside className="sidebar">
-      {error && <p className="error">{error}</p>}
-      {hubs.map((hub) => (
-        <HubNode key={hub.id} token={token} hub={hub} selected={selected} onSelect={onSelect} />
-      ))}
+      <div className="pane-header">
+        <span className="pane-title">Data Exchange AR/VR</span>
+        <button className="secondary pill-small" onClick={logout}>
+          Logout
+        </button>
+      </div>
+      <div className="sidebar-body">
+        {error && <p className="error">{error}</p>}
+        {hubs.map((hub) => (
+          <HubNode
+            key={hub.id}
+            token={token}
+            hub={hub}
+            selectedProject={selectedProject}
+            onSelectProject={onSelectProject}
+          />
+        ))}
+      </div>
     </aside>
   );
 }
@@ -77,13 +121,13 @@ function Sidebar({
 function HubNode({
   token,
   hub,
-  selected,
-  onSelect,
+  selectedProject,
+  onSelectProject,
 }: {
   token: string;
   hub: Hub;
-  selected: Exchange | null;
-  onSelect: (exchange: Exchange) => void;
+  selectedProject: Project | null;
+  onSelectProject: (project: Project) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -107,82 +151,83 @@ function HubNode({
   };
 
   return (
-    <div className="tree-node">
-      <div className={`tree-label ${open ? "open" : ""}`} onClick={toggle}>
-        {hub.name}
+    <div className="section">
+      <div className={`section-heading ${open ? "open" : ""}`} onClick={toggle}>
+        <span>{hub.name}</span>
+        <Chevron className={`disclosure ${open ? "open" : ""}`} />
       </div>
       {open && loading && (
-        <div className="tree-loading indent">
+        <div className="tree-loading">
           <Spinner /> Loading projects…
         </div>
       )}
-      {open &&
-        (projects ?? []).map((project) => (
-          <ProjectNode
-            key={project.id}
-            token={token}
-            project={project}
-            selected={selected}
-            onSelect={onSelect}
-          />
-        ))}
+      {open && (
+        <div className="row-group indent">
+          {(projects ?? []).map((project) => (
+            <div
+              key={project.id}
+              className={`row ${selectedProject?.id === project.id ? "selected" : ""}`}
+              onClick={() => onSelectProject(project)}
+            >
+              <span className="row-label">{project.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function ProjectNode({
+// ---------------------------------------------------------------------------
+// Exchange list: shown in the main pane once a project is selected
+// ---------------------------------------------------------------------------
+
+function ExchangeList({
   token,
   project,
-  selected,
   onSelect,
 }: {
   token: string;
   project: Project;
-  selected: Exchange | null;
   onSelect: (exchange: Exchange) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [exchanges, setExchanges] = useState<Exchange[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const toggle = () => {
-    setOpen((wasOpen) => !wasOpen);
-    if (exchanges === null) {
-      setLoading(true);
-      getExchanges(token, project.id).then(
-        (result) => {
-          setExchanges(result);
-          setLoading(false);
-        },
-        () => {
-          setExchanges([]);
-          setLoading(false);
-        },
-      );
-    }
-  };
+  useEffect(() => {
+    setExchanges(null);
+    setError(null);
+    getExchanges(token, project.id).then(setExchanges, (err) => {
+      setError(String(err));
+      setExchanges([]);
+    });
+  }, [token, project.id]);
 
   return (
-    <div className="tree-node indent">
-      <div className={`tree-label ${open ? "open" : ""}`} onClick={toggle}>
-        {project.name}
+    <main className="main-pane">
+      <div className="pane-header">
+        <span className="pane-title">{project.name}</span>
       </div>
-      {open && loading && (
-        <div className="tree-loading indent">
-          <Spinner /> Loading exchanges…
-        </div>
-      )}
-      {open &&
-        (exchanges ?? []).map((exchange) => (
-          <div
-            key={exchange.id}
-            className={`tree-leaf indent ${selected?.id === exchange.id ? "selected" : ""}`}
-            onClick={() => onSelect(exchange)}
-          >
-            {exchange.name}
+      <div className="pane-content">
+        {error && <p className="error">{error}</p>}
+        {exchanges === null && (
+          <div className="tree-loading">
+            <Spinner /> Loading exchanges…
           </div>
-        ))}
-    </div>
+        )}
+        {exchanges?.length === 0 && <p className="placeholder-text">No data exchanges found in this project.</p>}
+        {exchanges && exchanges.length > 0 && (
+          <div className="row-group">
+            {exchanges.map((exchange) => (
+              <div key={exchange.id} className="row" onClick={() => onSelect(exchange)}>
+                <span className="row-label">{exchange.name}</span>
+                <Chevron className="trailing" />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </main>
   );
 }
 
@@ -338,10 +383,18 @@ function LogsTab({
 }
 
 // ---------------------------------------------------------------------------
-// Main pane: tabs + conversion controls for the selected exchange
+// Main pane: exchange preview — tabs + conversion controls
 // ---------------------------------------------------------------------------
 
-function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
+function MainPane({
+  token,
+  exchange,
+  onBack,
+}: {
+  token: string;
+  exchange: Exchange;
+  onBack: () => void;
+}) {
   const [tab, setTab] = useState<Tab>("viewer");
   const [status, setStatus] = useState<ConversionStatus | null>(null);
   const [statusLoaded, setStatusLoaded] = useState(false);
@@ -389,7 +442,26 @@ function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
 
   return (
     <main className="main-pane">
-      <header className="toolbar">
+      <div className="pane-header">
+        <button className="icon-button" onClick={onBack} aria-label="Back">
+          <Chevron className="back" />
+        </button>
+        <span className="pane-title pane-title-centered">{exchange.name}</span>
+        <div className="conversion">
+          {status && <span className={`status ${status.status}`}>{status.status}</span>}
+          {status?.error && <span className="error">{status.error}</span>}
+          {status ? (
+            <button className="secondary" onClick={() => void remove()} disabled={status.status === "running"}>
+              {status.status === "running" ? "Converting…" : "Clear"}
+            </button>
+          ) : (
+            <button onClick={() => void convert()} disabled={!statusLoaded}>
+              Convert
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="tabs-row">
         <div className="tabs">
           {(["viewer", "glb", "usdz", "logs"] as Tab[]).map((t) => (
             <button
@@ -402,20 +474,7 @@ function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
             </button>
           ))}
         </div>
-        <div className="conversion">
-          {status ? (
-            <button className="secondary" onClick={() => void remove()} disabled={status.status === "running"}>
-              {status.status === "running" ? "Converting…" : "Delete"}
-            </button>
-          ) : (
-            <button onClick={() => void convert()} disabled={!statusLoaded}>
-              Convert
-            </button>
-          )}
-          {status && <span className={`status ${status.status}`}>{status.status}</span>}
-          {status?.error && <span className="error">{status.error}</span>}
-        </div>
-      </header>
+      </div>
 
       {tab === "viewer" && <ViewerTab token={token} exchange={exchange} />}
       {tab === "glb" && (
@@ -455,23 +514,33 @@ function MainPane({ token, exchange }: { token: string; exchange: Exchange }) {
 // ---------------------------------------------------------------------------
 
 function App({ token }: { token: string }) {
-  const [selected, setSelected] = useState<Exchange | null>(null);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [selectedExchange, setSelectedExchange] = useState<Exchange | null>(null);
+
+  const onSelectProject = useCallback((project: Project) => {
+    setSelectedExchange(null);
+    setSelectedProject(project);
+  }, []);
 
   return (
     <div className="app">
-      <nav className="topbar">
-        <div className="brand">
-          <img className="brand-logo" src={LOGO_URL} alt="Autodesk" />
-          <span>Data Exchange Immersive Demo</span>
-        </div>
-        <button className="secondary" onClick={logout}>Logout</button>
-      </nav>
       <div className="layout">
-        <Sidebar token={token} selected={selected} onSelect={setSelected} />
-        {selected ? (
-          <MainPane key={selected.id} token={token} exchange={selected} />
-        ) : (
-          <main className="main-pane placeholder">Select an exchange to begin.</main>
+        <Sidebar token={token} selectedProject={selectedProject} onSelectProject={onSelectProject} />
+        {!selectedProject && (
+          <main className="main-pane placeholder">
+            <p className="placeholder-text">Select a project to begin.</p>
+          </main>
+        )}
+        {selectedProject && !selectedExchange && (
+          <ExchangeList key={selectedProject.id} token={token} project={selectedProject} onSelect={setSelectedExchange} />
+        )}
+        {selectedExchange && (
+          <MainPane
+            key={selectedExchange.id}
+            token={token}
+            exchange={selectedExchange}
+            onBack={() => setSelectedExchange(null)}
+          />
         )}
       </div>
     </div>
@@ -497,9 +566,19 @@ function Root() {
   }, []);
 
   if (!ready && !token) {
-    return <div className="login">Loading…</div>;
+    return (
+      <>
+        <Backdrop />
+        <div className="login">Loading…</div>
+      </>
+    );
   }
-  return token ? <App token={token} /> : <LoginPage />;
+  return (
+    <>
+      <Backdrop />
+      {token ? <App token={token} /> : <LoginPage />}
+    </>
+  );
 }
 
 createRoot(document.getElementById("root")!).render(<Root />);
