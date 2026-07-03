@@ -6,21 +6,14 @@ const DEFAULT_BASE_URL = "https://data-exchange-viewing-service.azurewebsites.ne
 
 // The backend can be overridden with a `?service=<url>` query parameter, e.g. for pointing
 // at a local or staging deployment.
-function resolveBaseUrl(): string {
-  const fromQuery = new URL(window.location.href).searchParams.get("service");
-  return (fromQuery ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
-}
-
-const BASE_URL = resolveBaseUrl();
+const BASE_URL = (
+  new URL(window.location.href).searchParams.get("service") ?? DEFAULT_BASE_URL
+).replace(/\/+$/, "");
 
 export interface ConversionStatus {
   status: "running" | "completed" | "failed";
   artifacts: string[];
   error?: string | null;
-}
-
-function authHeaders(token: string): HeadersInit {
-  return { Authorization: `Bearer ${token}` };
 }
 
 // The exchange URN contains characters (':', '/', etc.) that must be escaped to fit in a path segment.
@@ -32,7 +25,7 @@ function exchangeEndpoint(urn: string): string {
 export async function startConversion(token: string, urn: string): Promise<void> {
   const response = await fetch(exchangeEndpoint(urn), {
     method: "POST",
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
     throw new Error(`Failed to start conversion: ${response.status} ${await response.text()}`);
@@ -43,7 +36,7 @@ export async function startConversion(token: string, urn: string): Promise<void>
 export async function deleteConversion(token: string, urn: string): Promise<void> {
   const response = await fetch(exchangeEndpoint(urn), {
     method: "DELETE",
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
     throw new Error(`Failed to delete conversion: ${response.status} ${await response.text()}`);
@@ -52,7 +45,7 @@ export async function deleteConversion(token: string, urn: string): Promise<void
 
 // Returns the current conversion status, or null if no conversion has been started for this exchange.
 export async function getStatus(token: string, urn: string): Promise<ConversionStatus | null> {
-  const response = await fetch(exchangeEndpoint(urn), { headers: authHeaders(token) });
+  const response = await fetch(exchangeEndpoint(urn), { headers: { Authorization: `Bearer ${token}` } });
   if (response.status === 404) {
     return null;
   }
@@ -64,7 +57,7 @@ export async function getStatus(token: string, urn: string): Promise<ConversionS
 
 async function fetchArtifact(token: string, urn: string, fileName: string): Promise<Response> {
   const response = await fetch(`${exchangeEndpoint(urn)}/${encodeURIComponent(fileName)}`, {
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
     throw new Error(`Failed to fetch artifact ${fileName}: ${response.status}`);
@@ -94,7 +87,7 @@ export async function fetchArtifactText(
 
 // Picks the first artifact with the given extension (e.g. ".glb", ".usdz"), or undefined.
 export function findArtifact(
-  status: ConversionStatus | null,
+  status: ConversionStatus | null | undefined,
   extension: string,
 ): string | undefined {
   return status?.artifacts.find((name) => name.toLowerCase().endsWith(extension));

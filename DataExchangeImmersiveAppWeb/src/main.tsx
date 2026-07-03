@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getStoredToken, handleCallback, login, logout } from "./auth.ts";
 import { getExchanges, getHubs, getProjects, type Exchange, type Hub, type Project } from "./aps.ts";
@@ -305,7 +305,7 @@ function ArtifactTab({
 }: {
   token: string;
   urn: string;
-  status: ConversionStatus | null;
+  status: ConversionStatus | null | undefined;
   extension: string;
   render: (blobUrl: string) => React.ReactNode;
 }) {
@@ -358,7 +358,7 @@ function LogsTab({
 }: {
   token: string;
   urn: string;
-  status: ConversionStatus | null;
+  status: ConversionStatus | null | undefined;
 }) {
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -418,8 +418,8 @@ function MainPane({
   onBack: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("viewer");
-  const [status, setStatus] = useState<ConversionStatus | null>(null);
-  const [statusLoaded, setStatusLoaded] = useState(false);
+  // undefined = not checked yet, null = no conversion started, otherwise the latest status.
+  const [status, setStatus] = useState<ConversionStatus | null | undefined>(undefined);
 
   // The conversion/viewing service identifies an exchange by its URL-encoded lineage URN
   // (urn:adsk.wipprod:dm.lineage:...), i.e. the exchange's fileUrn — not the GraphQL exchange id.
@@ -428,19 +428,9 @@ function MainPane({
   // As soon as an exchange is selected, check the viewing service for already-available artifacts.
   // The GLB/USDZ/logs tabs and the convert/delete button stay disabled until this first check settles.
   useEffect(() => {
-    setStatus(null);
-    setStatusLoaded(false);
+    setStatus(undefined);
     setTab("viewer");
-    getStatus(token, urn).then(
-      (result) => {
-        setStatus(result);
-        setStatusLoaded(true);
-      },
-      () => {
-        setStatus(null);
-        setStatusLoaded(true);
-      },
-    );
+    getStatus(token, urn).then(setStatus, () => setStatus(null));
   }, [token, urn]);
 
   // Poll while a conversion is running.
@@ -452,15 +442,15 @@ function MainPane({
     return () => clearInterval(timer);
   }, [token, urn, status?.status]);
 
-  const convert = useCallback(async () => {
+  async function convert() {
     await startConversion(token, urn);
     setStatus({ status: "running", artifacts: [] });
-  }, [token, urn]);
+  }
 
-  const remove = useCallback(async () => {
+  async function remove() {
     await deleteConversion(token, urn);
     setStatus(null);
-  }, [token, urn]);
+  }
 
   return (
     <main className="main-pane">
@@ -477,7 +467,7 @@ function MainPane({
               {status.status === "running" ? "Converting…" : "Clear"}
             </button>
           ) : (
-            <button onClick={() => void convert()} disabled={!statusLoaded}>
+            <button onClick={() => void convert()} disabled={status === undefined}>
               Convert
             </button>
           )}
@@ -489,7 +479,7 @@ function MainPane({
             <button
               key={t}
               className={tab === t ? "active" : ""}
-              disabled={t !== "viewer" && !statusLoaded}
+              disabled={t !== "viewer" && status === undefined}
               onClick={() => setTab(t)}
             >
               {TAB_LABELS[t]}
@@ -539,10 +529,10 @@ function App({ token }: { token: string }) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedExchange, setSelectedExchange] = useState<Exchange | null>(null);
 
-  const onSelectProject = useCallback((project: Project) => {
+  function onSelectProject(project: Project) {
     setSelectedExchange(null);
     setSelectedProject(project);
-  }, []);
+  }
 
   return (
     <div className="app">

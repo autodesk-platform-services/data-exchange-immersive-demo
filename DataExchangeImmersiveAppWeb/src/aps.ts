@@ -80,19 +80,16 @@ interface RawExchange {
 
 interface RawFolder {
   exchanges?: Results<RawExchange> | null;
-  folders?: Results<RawFolder> | null;
+  folders?: Results<{ exchanges?: Results<RawExchange> | null }> | null;
 }
 
-// Collects every exchange found in a folder and (recursively) its sub-folders.
-function flattenExchanges(folder: RawFolder): Exchange[] {
-  const here = (folder.exchanges?.results ?? []).map((exchange) => ({
+function toExchange(exchange: RawExchange): Exchange {
+  return {
     id: exchange.id,
     name: exchange.name,
     fileUrn: exchange.alternativeRepresentations?.fileUrn ?? "",
     fileVersionUrn: exchange.alternativeRepresentations?.fileVersionUrn ?? "",
-  }));
-  const nested = (folder.folders?.results ?? []).flatMap(flattenExchanges);
-  return [...here, ...nested];
+  };
 }
 
 export async function getExchanges(token: string, projectId: string): Promise<Exchange[]> {
@@ -122,5 +119,8 @@ export async function getExchanges(token: string, projectId: string): Promise<Ex
       }
     }`,
   );
-  return data.project.folders.results.flatMap(flattenExchanges);
+  return data.project.folders.results.flatMap((folder) => [
+    ...(folder.exchanges?.results ?? []).map(toExchange),
+    ...(folder.folders?.results ?? []).flatMap((sub) => (sub.exchanges?.results ?? []).map(toExchange)),
+  ]);
 }
