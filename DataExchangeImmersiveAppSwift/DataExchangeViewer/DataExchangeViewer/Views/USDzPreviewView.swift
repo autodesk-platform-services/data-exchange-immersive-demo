@@ -70,17 +70,25 @@ struct USDzPreviewView: View {
                                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                         }
                     } else {
+                        // Explicitly sized so its centered content doesn't get pulled down to the
+                        // ZStack's `.bottom` alignment, where it would overlap the controls below.
                         ContentUnavailableView(
-                            appModel.immersionKind == .full ? "Viewing in full space" : "Viewing in shared space",
-                            systemImage: appModel.immersionKind == .full ? "figure.walk" : "arkit"
+                            appModel.activeMode == .immersive ? "Viewing in full space" : "Viewing in a separate window",
+                            systemImage: appModel.activeMode == .immersive ? "figure.walk" : "move.3d"
                         )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
 
                     HStack(spacing: 16) {
-                        ImmersiveModeButton(fileURL: fileURL, kind: .mixed, label: "View in Space", systemImage: "arkit")
-                        ImmersiveModeButton(fileURL: fileURL, kind: .full, label: "Walk Through", systemImage: "figure.walk")
+                        PreviewModePicker(fileURL: fileURL)
+                        QuickLookButton(fileURL: fileURL)
                     }
                     .padding()
+                    // A shared glass backdrop so the controls stay legible over the portal's
+                    // RealityView content instead of just the picker's selected segment
+                    // providing contrast.
+                    .glassBackgroundEffect()
+                    .padding(.bottom)
                 }
             }
         }

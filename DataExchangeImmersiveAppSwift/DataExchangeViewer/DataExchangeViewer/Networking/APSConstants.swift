@@ -15,8 +15,5 @@ enum APSConstants {
 }
 
 enum ConversionServiceConstants {
-    // NOTE: SPEC.md names https://data-exchange-immersive-demo.autodesk.io, but that host doesn't
-    // have the artifacts produced via the web app — confirmed the web app's actual backend (and
-    // where existing conversions live) is this one.
     static let baseURL = URL(string: "https://data-exchange-viewing-service.azurewebsites.net")!
 }

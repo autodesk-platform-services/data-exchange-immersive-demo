@@ -364,3 +364,15 @@ FodyWeavers.xsd
 
 .DS_Store
 data
+
+## Xcode
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM

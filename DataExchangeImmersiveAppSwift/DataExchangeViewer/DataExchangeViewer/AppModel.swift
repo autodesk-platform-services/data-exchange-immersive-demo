@@ -6,21 +6,6 @@
 import Foundation
 import SwiftUI
 
-/// The two immersion styles the app supports for viewing a model outside the portal.
-enum ImmersionKind: Equatable {
-    /// The model appears alongside the user's real surroundings.
-    case mixed
-    /// The model (and its environment) fully replaces the user's surroundings.
-    case full
-
-    var style: ImmersionStyle {
-        switch self {
-        case .mixed: return .mixed
-        case .full: return .full
-        }
-    }
-}
-
 @MainActor
 @Observable
 final class AppModel {
@@ -30,14 +15,32 @@ final class AppModel {
         case open
     }
 
+    /// The three ways a model can be previewed. Only one is ever active at a time.
+    enum PreviewMode: Equatable {
+        /// A framed opening in the flat window, viewed from outside.
+        case portal
+        /// A bounded volumetric window the model floats in, viewed up close and manipulated by hand.
+        case volumetric
+        /// A full immersive space, replacing the user's surroundings, sized for walking through.
+        case immersive
+    }
+
     let immersiveSpaceID = "ImmersiveModelSpace"
+    let volumetricWindowID = "VolumetricModelSpace"
+
     var immersiveSpaceState: ImmersiveSpaceState = .closed
-    var immersionKind: ImmersionKind = .mixed
+    var isVolumetricWindowOpen = false
 
-    /// The USDZ file the immersive space should display, set right before opening it.
-    var immersiveModelURL: URL?
+    /// The USDZ file the volumetric window or immersive space should display, set right before opening either.
+    var previewModelURL: URL?
 
-    /// The in-window portal is hidden whenever an immersive space is open (or transitioning),
-    /// so only one presentation mode — portal, mixed, or full immersion — is visible at a time.
-    var isPortalVisible: Bool { immersiveSpaceState == .closed }
+    var activeMode: PreviewMode {
+        if immersiveSpaceState != .closed { return .immersive }
+        if isVolumetricWindowOpen { return .volumetric }
+        return .portal
+    }
+
+    /// The in-window portal is hidden whenever another presentation mode is active (or transitioning),
+    /// so only one of portal, volumetric, or full immersion is visible at a time.
+    var isPortalVisible: Bool { activeMode == .portal }
 }
