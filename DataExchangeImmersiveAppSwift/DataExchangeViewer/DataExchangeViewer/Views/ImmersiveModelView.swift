@@ -11,33 +11,13 @@ import RealityKit
 struct ImmersiveModelView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
-    @State private var root = Entity()
-    @State private var modelContainer = Entity()
-    @State private var loadedEntity: Entity?
 
     var body: some View {
-        RealityView { content in
-            root.addChild(modelContainer)
-            content.add(root)
-
-            if let environment = try? await StudioLighting.makeEnvironment() {
-                try? StudioLighting.apply(environment, to: root, withBackground: true)
-            }
-        } update: { _ in
-            // Only the model container is touched here, so the lighting/background entities
-            // added above (siblings of modelContainer under `root`) are left untouched.
-            modelContainer.children.removeAll()
-            if let loadedEntity {
-                modelContainer.addChild(loadedEntity)
-            }
-        }
-        .task(id: appModel.previewModelURL) {
-            loadedEntity = nil
-            guard let url = appModel.previewModelURL else { return }
-            guard let entity = try? await Entity(contentsOf: url) else { return }
-            Self.prepareForImmersiveViewing(entity)
-            loadedEntity = entity
-        }
+        ModelContainerRealityView(
+            fileURL: appModel.previewModelURL,
+            withBackground: true,
+            prepare: Self.prepareForImmersiveViewing
+        )
         // An ornament (rather than the flat window's button) so the exit control is always
         // reachable, even when the model's own geometry — placed at real-world scale in `.full`
         // immersion — ends up occluding the window it was opened from.

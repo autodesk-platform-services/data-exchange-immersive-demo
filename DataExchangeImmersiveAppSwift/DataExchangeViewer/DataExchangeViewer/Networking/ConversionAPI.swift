@@ -18,6 +18,16 @@ struct ConversionAPI {
         return URL(string: urlString)!
     }
 
+    // Maps the error status codes shared by every endpoint (401/403); anything else becomes a
+    // generic ConversionError.http carrying the status code and response body.
+    private func errorForStatus(_ http: HTTPURLResponse?, data: Data) -> Error {
+        switch http?.statusCode {
+        case 401: return ConversionError.unauthorized
+        case 403: return ConversionError.forbidden
+        default: return ConversionError.http(http?.statusCode ?? -1, String(data: data, encoding: .utf8) ?? "")
+        }
+    }
+
     func status(urn: String, token: String) async throws -> ConversionMetadata? {
         var request = URLRequest(url: endpoint(urn: urn))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -26,9 +36,7 @@ struct ConversionAPI {
         switch http?.statusCode {
         case 404: return nil
         case 200: return try JSONDecoder().decode(ConversionMetadata.self, from: data)
-        case 401: throw ConversionError.unauthorized
-        case 403: throw ConversionError.forbidden
-        default: throw ConversionError.http(http?.statusCode ?? -1, String(data: data, encoding: .utf8) ?? "")
+        default: throw errorForStatus(http, data: data)
         }
     }
 
@@ -41,9 +49,7 @@ struct ConversionAPI {
         switch http?.statusCode {
         case 202: return
         case 409: throw ConversionError.conflict
-        case 401: throw ConversionError.unauthorized
-        case 403: throw ConversionError.forbidden
-        default: throw ConversionError.http(http?.statusCode ?? -1, String(data: data, encoding: .utf8) ?? "")
+        default: throw errorForStatus(http, data: data)
         }
     }
 
@@ -55,9 +61,7 @@ struct ConversionAPI {
         let http = response as? HTTPURLResponse
         switch http?.statusCode {
         case 200: return
-        case 401: throw ConversionError.unauthorized
-        case 403: throw ConversionError.forbidden
-        default: throw ConversionError.http(http?.statusCode ?? -1, String(data: data, encoding: .utf8) ?? "")
+        default: throw errorForStatus(http, data: data)
         }
     }
 
@@ -67,11 +71,7 @@ struct ConversionAPI {
         let (data, response) = try await URLSession.shared.data(for: request)
         let http = response as? HTTPURLResponse
         guard http?.statusCode == 200 else {
-            switch http?.statusCode {
-            case 401: throw ConversionError.unauthorized
-            case 403: throw ConversionError.forbidden
-            default: throw ConversionError.http(http?.statusCode ?? -1, String(data: data, encoding: .utf8) ?? "")
-            }
+            throw errorForStatus(http, data: data)
         }
         return data
     }

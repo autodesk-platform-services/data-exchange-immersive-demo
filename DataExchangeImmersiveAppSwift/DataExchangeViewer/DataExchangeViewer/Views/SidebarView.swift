@@ -8,18 +8,27 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(AuthManager.self) private var auth
     @Binding var selectedProject: Project?
-    @State private var store = HubsProjectsStore()
+    @State private var hubs: [Hub] = []
+    @State private var projectsByHub: [String: [Project]] = [:]
+    @State private var loadingHubIDs: Set<String> = []
+    @State private var errorMessage: String?
 
     var body: some View {
         List {
-            ForEach(store.hubs) { hub in
-                HubRow(hub: hub, store: store, selectedProject: $selectedProject)
+            ForEach(hubs) { hub in
+                HubRow(
+                    hub: hub,
+                    projects: projectsByHub[hub.id],
+                    isLoading: loadingHubIDs.contains(hub.id),
+                    selectedProject: $selectedProject,
+                    onExpand: { await loadProjectsIfNeeded(hubID: hub.id) }
+                )
             }
         }
         .overlay {
-            if store.hubs.isEmpty {
-                if let error = store.errorMessage {
-                    ContentUnavailableView("Failed to load hubs", systemImage: "exclamationmark.triangle", description: Text(error))
+            if hubs.isEmpty {
+                if let errorMessage {
+                    ContentUnavailableView("Failed to load hubs", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
                 } else {
                     ContentUnavailableView("No hubs found", systemImage: "building.2")
                 }
@@ -33,23 +42,40 @@ struct SidebarView: View {
         }
         .task {
             guard let token = try? await auth.validAccessToken() else { return }
-            await store.loadHubs(token: token)
+            do {
+                hubs = try await DataExchangeAPI().hubs(token: token)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadProjectsIfNeeded(hubID: String) async {
+        guard projectsByHub[hubID] == nil, !loadingHubIDs.contains(hubID),
+              let token = try? await auth.validAccessToken() else { return }
+        loadingHubIDs.insert(hubID)
+        defer { loadingHubIDs.remove(hubID) }
+        do {
+            projectsByHub[hubID] = try await DataExchangeAPI().projects(token: token, hubId: hubID)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
 
 private struct HubRow: View {
     let hub: Hub
-    let store: HubsProjectsStore
+    let projects: [Project]?
+    let isLoading: Bool
     @Binding var selectedProject: Project?
-    @Environment(AuthManager.self) private var auth
+    let onExpand: () async -> Void
     @State private var isExpanded = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            if store.loadingHubIDs.contains(hub.id) {
+            if isLoading {
                 ProgressView()
-            } else if let projects = store.projectsByHub[hub.id] {
+            } else if let projects {
                 if projects.isEmpty {
                     Text("No projects").foregroundStyle(.secondary)
                 } else {
@@ -66,8 +92,8 @@ private struct HubRow: View {
             Text(hub.name)
         }
         .task(id: isExpanded) {
-            guard isExpanded, let token = try? await auth.validAccessToken() else { return }
-            await store.loadProjectsIfNeeded(hubID: hub.id, token: token)
+            guard isExpanded else { return }
+            await onExpand()
         }
     }
 }

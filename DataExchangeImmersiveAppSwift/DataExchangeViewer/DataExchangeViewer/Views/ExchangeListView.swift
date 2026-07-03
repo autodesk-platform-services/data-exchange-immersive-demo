@@ -8,11 +8,13 @@ import SwiftUI
 struct ExchangeListView: View {
     let project: Project
     @Environment(AuthManager.self) private var auth
-    @State private var store = ExchangesStore()
+    @State private var exchanges: [Exchange] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
-            List(store.exchanges) { exchange in
+            List(exchanges) { exchange in
                 NavigationLink(exchange.name, value: exchange)
             }
             .navigationDestination(for: Exchange.self) { exchange in
@@ -20,17 +22,25 @@ struct ExchangeListView: View {
             }
             .navigationTitle(project.name)
             .overlay {
-                if store.isLoading {
+                if isLoading {
                     ProgressView()
-                } else if let error = store.errorMessage {
-                    ContentUnavailableView("Failed to load exchanges", systemImage: "exclamationmark.triangle", description: Text(error))
-                } else if store.exchanges.isEmpty {
+                } else if let errorMessage {
+                    ContentUnavailableView("Failed to load exchanges", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
+                } else if exchanges.isEmpty {
                     ContentUnavailableView("No exchanges in this project", systemImage: "shippingbox")
                 }
             }
         }
         .task(id: project.id) {
-            await store.load(projectID: project.id, auth: auth)
+            isLoading = true
+            errorMessage = nil
+            defer { isLoading = false }
+            do {
+                let token = try await auth.validAccessToken()
+                exchanges = try await DataExchangeAPI().exchanges(token: token, projectId: project.id)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
