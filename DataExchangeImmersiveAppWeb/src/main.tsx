@@ -74,6 +74,21 @@ function Chevron({ className = "" }: { className?: string }) {
   );
 }
 
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        d="M12 3v12m0 0l-5-5m5 5l5-5M5 20h14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Sidebar: app header + lazily-expanded Hub ▸ Project tree
 // ---------------------------------------------------------------------------
@@ -322,7 +337,14 @@ function ArtifactTab({
   if (!blobUrl) {
     return <div className="tab-body placeholder">Loading {extension}…</div>;
   }
-  return <div className="tab-body">{render(blobUrl)}</div>;
+  return (
+    <div className="tab-body">
+      <a className="download-button" href={blobUrl} download={fileName} aria-label={`Download ${fileName}`}>
+        <DownloadIcon />
+      </a>
+      {render(blobUrl)}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

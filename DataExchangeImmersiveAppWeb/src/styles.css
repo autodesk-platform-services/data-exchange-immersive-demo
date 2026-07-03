@@ -449,6 +449,27 @@ button.pill-small {
   position: relative;
 }
 
+.download-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.6);
+  color: #fff;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.download-button:hover {
+  background: rgba(20, 20, 20, 0.85);
+}
+
 .note {
   margin: 0;
   padding: 10px 20px;
