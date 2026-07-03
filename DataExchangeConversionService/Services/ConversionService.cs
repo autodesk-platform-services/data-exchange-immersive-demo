@@ -161,23 +161,16 @@ public sealed class ConversionService
                 .ToList())
             {
                 var objPath = Path.Combine(outputFolder, objFileName);
-
-                // The extraction emits Z-up geometry; rotate the OBJ to the Y-up convention that
-                // OBJ/glTF/USD viewers assume before deriving the GLB and USDZ artifacts from it.
                 var memory = new MemoryTelemetry(_logger, "Exchange post-processing");
 
-                Step($"rotating OBJ {objFileName} from Z-up to Y-up");
-                using (memory.Step("rotate OBJ Z-up to Y-up"))
-                {
-                    ObjModel.ConvertZUpToYUp(objPath);
-                }
-
+                // The extraction emits Z-up geometry; both converters rotate it to the Y-up
+                // convention that OBJ/glTF/USD viewers assume on the fly as they stream the OBJ.
                 var glbFileName = Path.ChangeExtension(objFileName, ".glb");
                 var glbPath = Path.Combine(outputFolder, glbFileName);
                 Step($"converting OBJ {objFileName} to GLB {glbFileName}");
                 using (memory.Step("convert OBJ to GLB"))
                 {
-                    GltfConverter.ConvertObjToGlb(objPath, glbPath, _logger);
+                    GltfConverter.ConvertObjToGlb(objPath, glbPath, convertZUpToYUp: true, logger: _logger);
                 }
                 metadata.Artifacts.Add(glbFileName);
                 ForceFullGarbageCollection(_logger, "OBJ to GLB conversion");
@@ -187,7 +180,7 @@ public sealed class ConversionService
                 Step($"converting OBJ {objFileName} to USDZ {usdzFileName}");
                 using (memory.Step("convert OBJ to USDZ"))
                 {
-                    UsdzConverter.ConvertObjToUsdz(objPath, usdzPath, _logger);
+                    UsdzConverter.ConvertObjToUsdz(objPath, usdzPath, convertZUpToYUp: true, logger: _logger);
                 }
                 metadata.Artifacts.Add(usdzFileName);
                 ForceFullGarbageCollection(_logger, "OBJ to USDZ conversion");

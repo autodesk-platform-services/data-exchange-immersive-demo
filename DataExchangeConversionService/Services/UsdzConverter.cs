@@ -8,51 +8,35 @@ namespace DataExchangeViewingService.Services;
 // extraction into a single, self-contained USDZ package (*.usdz).
 //
 // A USDZ file is an (uncompressed) zip archive whose first entry is the default USD layer. We
-// reuse the shared ObjModel parser, emit an ASCII USD (*.usda) layer describing the geometry and
+// reuse the shared ObjReader parser, emit an ASCII USD (*.usda) layer describing the geometry and
 // UsdPreviewSurface materials, embed any referenced textures, and pack everything with the
 // 64-byte data alignment that the USDZ format mandates. Both OBJ and USD use a right-handed,
-// Y-up coordinate system with a bottom-left texture origin, so no coordinate conversion is needed.
+// Y-up coordinate system with a bottom-left texture origin, so no coordinate conversion is needed
+// once the OBJ has been reoriented (see convertZUpToYUp).
 public static class UsdzConverter
 {
     private static readonly Vector3 DefaultDiffuse = new(0.8f, 0.8f, 0.8f);
 
     // Converts the given OBJ file into a USDZ package. Any MTL libraries referenced by the OBJ
-    // (and resolved relative to the OBJ's folder) drive the generated materials.
-    public static void ConvertObjToUsdz(string objPath, string usdzPath, ILogger? logger = null)
+    // (and resolved relative to the OBJ's folder) drive the generated materials. Each OBJ group
+    // ("g") becomes its own named child Xform, further split into per-material Mesh prims. When
+    // convertZUpToYUp is set, vertex positions/normals are rotated from Z-up to Y-up on the fly as
+    // they're read.
+    public static void ConvertObjToUsdz(string objPath, string usdzPath, bool convertZUpToYUp = true, ILogger? logger = null)
     {
         var memory = logger is null ? null : new MemoryTelemetry(logger, $"USDZ conversion");
         var baseFolder = Path.GetDirectoryName(Path.GetFullPath(objPath)) ?? ".";
-        ObjModel obj;
-        using (memory?.Step("load OBJ and MTL for USDZ"))
-        {
-            obj = ObjModel.Load(objPath);
-        }
         var modelName = Sanitize(Path.GetFileNameWithoutExtension(objPath), "Model");
-
-        // Group faces by material so each becomes a separate USD Mesh, mirroring the per-material
-        // primitives produced by the glTF converter.
-        List<MeshGroup> groups;
-        using (memory?.Step("group OBJ faces by material for USDZ"))
-        {
-            groups = GroupFacesByMaterial(obj);
-        }
-
-        // Resolve the distinct materials used and register the textures they reference.
-        var textures = new TextureRegistry(baseFolder);
-        Dictionary<string, UsdMaterial> materials;
-        using (memory?.Step("resolve USDZ materials and texture references"))
-        {
-            materials = ResolveMaterials(groups, obj, textures);
-        }
 
         // The default layer must be the archive's first entry.
         var layerName = modelName + ".usda";
         var usdzFolder = Path.GetDirectoryName(Path.GetFullPath(usdzPath)) ?? ".";
         var usdaPath = Path.Combine(usdzFolder, layerName);
+        var textures = new TextureRegistry(baseFolder);
 
-        using (memory?.Step("write USDA text layer"))
+        using (memory?.Step("stream OBJ groups into USDA text layer"))
         {
-            WriteUsda(usdaPath, obj, groups, materials, modelName);
+            WriteUsda(usdaPath, objPath, convertZUpToYUp, textures, modelName);
         }
 
         List<UsdzEntry> entries;
@@ -71,12 +55,12 @@ public static class UsdzConverter
         }
     }
 
-    private static List<MeshGroup> GroupFacesByMaterial(ObjModel obj)
+    private static List<MeshGroup> GroupFacesByMaterial(IReadOnlyList<ObjFace> faces, ObjReader reader)
     {
         var byKey = new Dictionary<string, MeshGroup>(StringComparer.Ordinal);
         var ordered = new List<MeshGroup>();
 
-        foreach (var face in obj.Faces)
+        foreach (var face in faces)
         {
             if (face.Corners.Count < 3)
             {
@@ -84,7 +68,7 @@ public static class UsdzConverter
             }
 
             // Faces referencing an unknown (or no) material fall back to a shared default bucket.
-            var key = face.Material is not null && obj.Materials.ContainsKey(face.Material)
+            var key = face.Material is not null && reader.GetMaterial(face.Material) is not null
                 ? face.Material
                 : string.Empty;
 
@@ -101,14 +85,14 @@ public static class UsdzConverter
         return ordered;
     }
 
-    private static Dictionary<string, UsdMaterial> ResolveMaterials(
+    // Registers any materials used by these mesh groups that haven't already been resolved.
+    private static void ResolveMaterials(
         IEnumerable<MeshGroup> groups,
-        ObjModel obj,
-        TextureRegistry textures)
+        ObjReader reader,
+        TextureRegistry textures,
+        Dictionary<string, UsdMaterial> resolved,
+        HashSet<string> usedNames)
     {
-        var resolved = new Dictionary<string, UsdMaterial>(StringComparer.Ordinal);
-        var usedNames = new HashSet<string>(StringComparer.Ordinal);
-
         foreach (var group in groups)
         {
             if (resolved.ContainsKey(group.MaterialKey))
@@ -116,7 +100,7 @@ public static class UsdzConverter
                 continue;
             }
 
-            var definition = group.MaterialKey.Length > 0 ? obj.Materials[group.MaterialKey] : null;
+            var definition = group.MaterialKey.Length > 0 ? reader.GetMaterial(group.MaterialKey) : null;
             var name = UniqueName(
                 Sanitize(group.MaterialKey.Length > 0 ? group.MaterialKey : "defaultMaterial", "material"),
                 usedNames);
@@ -131,15 +115,13 @@ public static class UsdzConverter
                 definition?.Alpha ?? 1f,
                 texture);
         }
-
-        return resolved;
     }
 
     private static void WriteUsda(
         string path,
-        ObjModel obj,
-        IReadOnlyList<MeshGroup> groups,
-        IReadOnlyDictionary<string, UsdMaterial> materials,
+        string objPath,
+        bool convertZUpToYUp,
+        TextureRegistry textures,
         string modelName)
     {
         using var writer = new StreamWriter(path, append: false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -153,9 +135,20 @@ public static class UsdzConverter
         writer.Write($"def Xform \"{modelName}\"\n");
         writer.Write("{\n");
 
-        for (var i = 0; i < groups.Count; i++)
+        var materials = new Dictionary<string, UsdMaterial>(StringComparer.Ordinal);
+        var usedMaterialNames = new HashSet<string>(StringComparer.Ordinal);
+        var usedGroupNames = new HashSet<string>(StringComparer.Ordinal);
+
+        using (var reader = new ObjReader(objPath, convertZUpToYUp))
         {
-            WriteMesh(writer, obj, groups[i], materials[groups[i].MaterialKey], $"mesh_{i}", modelName);
+            foreach (var group in reader.ReadGroups())
+            {
+                var meshGroups = GroupFacesByMaterial(group.Faces, reader);
+                ResolveMaterials(meshGroups, reader, textures, materials, usedMaterialNames);
+
+                var xformName = UniqueName(Sanitize(group.Name, "group"), usedGroupNames);
+                WriteGroupXform(writer, reader, meshGroups, materials, modelName, xformName);
+            }
         }
 
         writer.Write("    def Scope \"Materials\"\n");
@@ -169,13 +162,33 @@ public static class UsdzConverter
         writer.Write("}\n");
     }
 
+    private static void WriteGroupXform(
+        TextWriter writer,
+        ObjReader reader,
+        IReadOnlyList<MeshGroup> meshGroups,
+        IReadOnlyDictionary<string, UsdMaterial> materials,
+        string modelName,
+        string xformName)
+    {
+        writer.Write($"    def Xform \"{xformName}\"\n");
+        writer.Write("    {\n");
+
+        for (var i = 0; i < meshGroups.Count; i++)
+        {
+            WriteMesh(writer, reader, meshGroups[i], materials[meshGroups[i].MaterialKey], $"mesh_{i}", modelName, "        ");
+        }
+
+        writer.Write("    }\n");
+    }
+
     private static void WriteMesh(
         TextWriter writer,
-        ObjModel obj,
+        ObjReader reader,
         MeshGroup group,
         UsdMaterial material,
         string meshName,
-        string modelName)
+        string modelName,
+        string indent)
     {
         // Build a self-contained vertex set for this material group. Positions are de-duplicated
         // per group; normals and UVs are face-varying (one value per face corner).
@@ -189,7 +202,7 @@ public static class UsdzConverter
 
         foreach (var face in group.Faces)
         {
-            var faceNormal = ComputeFaceNormal(obj, face);
+            var faceNormal = ComputeFaceNormal(reader.Positions, face);
             faceVertexCounts.Add(face.Corners.Count);
 
             foreach (var corner in face.Corners)
@@ -198,16 +211,16 @@ public static class UsdzConverter
                 {
                     index = points.Count;
                     localIndex[corner.Position] = index;
-                    points.Add(obj.Positions[corner.Position]);
+                    points.Add(reader.Positions[corner.Position]);
                 }
                 faceVertexIndices.Add(index);
 
-                normals.Add(corner.HasNormal ? obj.Normals[corner.Normal] : faceNormal);
+                normals.Add(corner.HasNormal ? reader.Normals[corner.Normal] : faceNormal);
 
                 if (corner.HasTexCoord)
                 {
                     anyTexCoord = true;
-                    uvs.Add(obj.TexCoords[corner.TexCoord]);
+                    uvs.Add(reader.TexCoords[corner.TexCoord]);
                 }
                 else
                 {
@@ -217,34 +230,35 @@ public static class UsdzConverter
         }
 
         var emitTexCoords = anyTexCoord || material.Texture is not null;
+        var body = indent + "    ";
 
-        writer.Write($"    def Mesh \"{meshName}\"\n");
-        writer.Write("    {\n");
-        writer.Write("        uniform bool doubleSided = 1\n");
-        writer.Write("        int[] faceVertexCounts = ");
+        writer.Write($"{indent}def Mesh \"{meshName}\"\n");
+        writer.Write($"{indent}{{\n");
+        writer.Write($"{body}uniform bool doubleSided = 1\n");
+        writer.Write($"{body}int[] faceVertexCounts = ");
         WriteInts(writer, faceVertexCounts);
         writer.Write('\n');
-        writer.Write("        int[] faceVertexIndices = ");
+        writer.Write($"{body}int[] faceVertexIndices = ");
         WriteInts(writer, faceVertexIndices);
         writer.Write('\n');
-        writer.Write("        point3f[] points = ");
+        writer.Write($"{body}point3f[] points = ");
         WriteVec3(writer, points);
         writer.Write('\n');
-        writer.Write("        normal3f[] normals = ");
+        writer.Write($"{body}normal3f[] normals = ");
         WriteVec3(writer, normals);
         writer.Write(" (\n");
-        writer.Write("            interpolation = \"faceVarying\"\n");
-        writer.Write("        )\n");
+        writer.Write($"{body}    interpolation = \"faceVarying\"\n");
+        writer.Write($"{body})\n");
         if (emitTexCoords)
         {
-            writer.Write("        texCoord2f[] primvars:st = ");
+            writer.Write($"{body}texCoord2f[] primvars:st = ");
             WriteVec2(writer, uvs);
             writer.Write(" (\n");
-            writer.Write("            interpolation = \"faceVarying\"\n");
-            writer.Write("        )\n");
+            writer.Write($"{body}    interpolation = \"faceVarying\"\n");
+            writer.Write($"{body})\n");
         }
-        writer.Write($"        rel material:binding = </{modelName}/Materials/{material.Name}>\n");
-        writer.Write("    }\n");
+        writer.Write($"{body}rel material:binding = </{modelName}/Materials/{material.Name}>\n");
+        writer.Write($"{indent}}}\n");
     }
 
     private static void WriteMaterial(TextWriter writer, UsdMaterial material, string modelName)
@@ -294,17 +308,17 @@ public static class UsdzConverter
         writer.Write("        }\n");
     }
 
-    private static Vector3 ComputeFaceNormal(ObjModel obj, ObjFace face)
+    private static Vector3 ComputeFaceNormal(IReadOnlyList<Vector3> positions, ObjFace face)
     {
         // Use the explicit normals when present; otherwise derive a flat normal from the first
         // three corners (sufficient for the planar faces produced by the extraction).
         if (face.Corners.Count >= 3
             && (!face.Corners[0].HasNormal || !face.Corners[1].HasNormal || !face.Corners[2].HasNormal))
         {
-            var a = obj.Positions[face.Corners[0].Position];
-            var b = obj.Positions[face.Corners[1].Position];
-            var c = obj.Positions[face.Corners[2].Position];
-            return ObjModel.ComputeNormal(a, b, c);
+            var a = positions[face.Corners[0].Position];
+            var b = positions[face.Corners[1].Position];
+            var c = positions[face.Corners[2].Position];
+            return ObjReader.ComputeNormal(a, b, c);
         }
 
         return Vector3.UnitY;
