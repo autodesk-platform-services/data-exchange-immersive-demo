@@ -27,9 +27,9 @@ public static class GltfConverter
     // Each OBJ group ("g") becomes its own named node/mesh in the resulting glTF, split further
     // into per-material primitives. When convertZUpToYUp is set, vertex positions/normals are
     // rotated from Z-up to Y-up on the fly as they're read.
-    public static void ConvertObjToGlb(string objPath, string glbPath, bool convertZUpToYUp = true, ILogger? logger = null)
+    public static void ConvertObjToGlb(string objPath, string glbPath, bool convertZUpToYUp = true, ILogger? logger = null, string? logPath = null)
     {
-        var memory = logger is null ? null : new MemoryTelemetry(logger, $"GLB conversion");
+        var memory = logger is null ? null : new MemoryTelemetry(logger, $"GLB conversion", logPath);
         var baseFolder = Path.GetDirectoryName(Path.GetFullPath(objPath)) ?? ".";
 
         var materialBuilders = new Dictionary<string, MaterialBuilder>(StringComparer.OrdinalIgnoreCase);

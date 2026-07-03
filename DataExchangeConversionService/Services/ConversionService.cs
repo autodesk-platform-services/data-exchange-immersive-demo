@@ -161,7 +161,7 @@ public sealed class ConversionService
                 .ToList())
             {
                 var objPath = Path.Combine(outputFolder, objFileName);
-                var memory = new MemoryTelemetry(_logger, "Exchange post-processing");
+                var memory = new MemoryTelemetry(_logger, "Exchange post-processing", logPath);
 
                 // The extraction emits Z-up geometry; both converters rotate it to the Y-up
                 // convention that OBJ/glTF/USD viewers assume on the fly as they stream the OBJ.
@@ -170,7 +170,7 @@ public sealed class ConversionService
                 Step($"converting OBJ {objFileName} to GLB {glbFileName}");
                 using (memory.Step("convert OBJ to GLB"))
                 {
-                    GltfConverter.ConvertObjToGlb(objPath, glbPath, convertZUpToYUp: true, logger: _logger);
+                    GltfConverter.ConvertObjToGlb(objPath, glbPath, convertZUpToYUp: true, logger: _logger, logPath: logPath);
                 }
                 metadata.Artifacts.Add(glbFileName);
                 ForceFullGarbageCollection(_logger, "OBJ to GLB conversion");
@@ -180,7 +180,7 @@ public sealed class ConversionService
                 Step($"converting OBJ {objFileName} to USDZ {usdzFileName}");
                 using (memory.Step("convert OBJ to USDZ"))
                 {
-                    UsdzConverter.ConvertObjToUsdz(objPath, usdzPath, convertZUpToYUp: true, logger: _logger);
+                    UsdzConverter.ConvertObjToUsdz(objPath, usdzPath, convertZUpToYUp: true, logger: _logger, logPath: logPath);
                 }
                 metadata.Artifacts.Add(usdzFileName);
                 ForceFullGarbageCollection(_logger, "OBJ to USDZ conversion");

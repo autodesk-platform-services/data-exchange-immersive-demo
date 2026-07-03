@@ -22,9 +22,9 @@ public static class UsdzConverter
     // ("g") becomes its own named child Xform, further split into per-material Mesh prims. When
     // convertZUpToYUp is set, vertex positions/normals are rotated from Z-up to Y-up on the fly as
     // they're read.
-    public static void ConvertObjToUsdz(string objPath, string usdzPath, bool convertZUpToYUp = true, ILogger? logger = null)
+    public static void ConvertObjToUsdz(string objPath, string usdzPath, bool convertZUpToYUp = true, ILogger? logger = null, string? logPath = null)
     {
-        var memory = logger is null ? null : new MemoryTelemetry(logger, $"USDZ conversion");
+        var memory = logger is null ? null : new MemoryTelemetry(logger, $"USDZ conversion", logPath);
         var baseFolder = Path.GetDirectoryName(Path.GetFullPath(objPath)) ?? ".";
         var modelName = Sanitize(Path.GetFileNameWithoutExtension(objPath), "Model");
 
@@ -51,7 +51,7 @@ public static class UsdzConverter
 
         using (memory?.Step("write USDZ archive"))
         {
-            UsdzArchive.Write(usdzPath, entries, logger);
+            UsdzArchive.Write(usdzPath, entries, logger, logPath);
         }
     }
 
@@ -459,9 +459,9 @@ public static class UsdzConverter
         private const int Alignment = 64;
         private static readonly uint[] CrcTable = BuildCrcTable();
 
-        public static void Write(string path, IReadOnlyList<UsdzEntry> entries, ILogger? logger = null)
+        public static void Write(string path, IReadOnlyList<UsdzEntry> entries, ILogger? logger = null, string? logPath = null)
         {
-            var memory = logger is null ? null : new MemoryTelemetry(logger, $"USDZ archive");
+            var memory = logger is null ? null : new MemoryTelemetry(logger, $"USDZ archive", logPath);
             using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
             using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
 
