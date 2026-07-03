@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
@@ -52,6 +54,70 @@ public static class UsdzConverter
         using (memory?.Step("write USDZ archive"))
         {
             UsdzArchive.Write(usdzPath, entries, logger, logPath);
+        }
+
+        using (memory?.Step("optimize USDZ archive to crate format"))
+        {
+            TryOptimizeToCrate(usdzPath, logger, logPath);
+        }
+    }
+
+    // Best-effort post-process that re-encodes the USDZ package's ASCII default layer as a
+    // binary crate (.usdc) layer via Scripts/usdz_to_crate.py, which is smaller and loads
+    // faster. The target machine may not have Python or its usd-core dependency installed, so
+    // any failure here is logged and swallowed rather than failing the overall conversion.
+    private static void TryOptimizeToCrate(string usdzPath, ILogger? logger, string? logPath)
+    {
+        var scriptPath = Path.Combine(AppContext.BaseDirectory, "Scripts", "usdz_to_crate.py");
+        if (!File.Exists(scriptPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var startInfo = new ProcessStartInfo("python")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            startInfo.ArgumentList.Add(scriptPath);
+            startInfo.ArgumentList.Add(usdzPath);
+
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                LogOptimizationSkipped(logger, logPath, "the Python process could not be started");
+                return;
+            }
+
+            // Drain both streams concurrently before blocking on exit, since the child could
+            // otherwise deadlock writing to a full stdout/stderr pipe that nobody is reading yet.
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            process.StandardOutput.ReadToEndAsync();
+            process.WaitForExit();
+
+            if (process.ExitCode != 0)
+            {
+                var stderr = stderrTask.GetAwaiter().GetResult().Trim();
+                LogOptimizationSkipped(logger, logPath, $"python exited with code {process.ExitCode} ({stderr})");
+            }
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException)
+        {
+            LogOptimizationSkipped(logger, logPath, $"Python is not available ({ex.Message})");
+        }
+    }
+
+    private static void LogOptimizationSkipped(ILogger? logger, string? logPath, string reason)
+    {
+        var message = $"USDZ crate optimization was not possible: {reason}.";
+        logger?.LogInformation(message);
+        if (!string.IsNullOrWhiteSpace(logPath))
+        {
+            File.AppendAllText(logPath, $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
         }
     }
 
