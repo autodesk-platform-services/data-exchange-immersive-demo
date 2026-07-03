@@ -65,7 +65,7 @@ public static class GltfConverter
                     // Supply a flat face normal whenever the OBJ omitted explicit vertex normals.
                     if (!face.Corners[0].HasNormal || !face.Corners[i].HasNormal || !face.Corners[i + 1].HasNormal)
                     {
-                        var faceNormal = ComputeNormal(a.Geometry.Position, b.Geometry.Position, c.Geometry.Position);
+                        var faceNormal = ObjModel.ComputeNormal(a.Geometry.Position, b.Geometry.Position, c.Geometry.Position);
                         a = WithNormal(a, faceNormal);
                         b = WithNormal(b, faceNormal);
                         c = WithNormal(c, faceNormal);
@@ -108,12 +108,6 @@ public static class GltfConverter
         var geometry = vertex.Geometry;
         geometry.Normal = normal;
         return new VERTEX(geometry, vertex.Material);
-    }
-
-    private static Vector3 ComputeNormal(Vector3 a, Vector3 b, Vector3 c)
-    {
-        var normal = Vector3.Cross(b - a, c - a);
-        return normal.LengthSquared() > 1e-12f ? Vector3.Normalize(normal) : Vector3.UnitY;
     }
 
     private static MaterialBuilder ResolveMaterial(

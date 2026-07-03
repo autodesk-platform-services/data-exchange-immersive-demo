@@ -104,6 +104,14 @@ public sealed class ObjModel
 
     private static string FormatFloat(float value) => value.ToString("R", CultureInfo.InvariantCulture);
 
+    // Normalized flat normal for the triangle (a, b, c), falling back to +Y when it's degenerate.
+    // Shared by the glTF and USDZ converters, which both need this to fill in missing normals.
+    public static Vector3 ComputeNormal(Vector3 a, Vector3 b, Vector3 c)
+    {
+        var normal = Vector3.Cross(b - a, c - a);
+        return normal.LengthSquared() > 1e-12f ? Vector3.Normalize(normal) : Vector3.UnitY;
+    }
+
     private static ObjModel ParseObj(string objPath)
     {
         var data = new ObjModel();

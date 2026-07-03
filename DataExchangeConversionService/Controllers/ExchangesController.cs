@@ -8,9 +8,9 @@ namespace DataExchangeViewingService.Controllers;
 [Route("api/exchanges")]
 public sealed class ExchangesController : ControllerBase
 {
-    private readonly IConversionService _conversionService;
+    private readonly ConversionService _conversionService;
 
-    public ExchangesController(IConversionService conversionService)
+    public ExchangesController(ConversionService conversionService)
     {
         _conversionService = conversionService;
     }
@@ -81,9 +81,13 @@ public sealed class ExchangesController : ControllerBase
     // Returns an error result unless a bearer token with access to the exchange is present, otherwise null.
     private async Task<IActionResult?> RequireExchangeAccessAsync(string exchangeUrn)
     {
-        if (RequireBearerToken(out var bearerToken) is { } unauthorized)
+        if (!TryGetBearerToken(out var bearerToken))
         {
-            return unauthorized;
+            return Unauthorized(new ProblemDetails
+            {
+                Title = "Missing bearer token",
+                Detail = "Provide an Authorization header in the form 'Bearer {token}'."
+            });
         }
 
         if (!await _conversionService.HasAccessAsync(exchangeUrn, bearerToken))
@@ -93,21 +97,6 @@ public sealed class ExchangesController : ControllerBase
                 Title = "Access denied",
                 Detail = "The provided token does not have access to this data exchange.",
                 Status = StatusCodes.Status403Forbidden
-            });
-        }
-
-        return null;
-    }
-
-    // Returns an Unauthorized result when no bearer token is present, otherwise null.
-    private IActionResult? RequireBearerToken(out string bearerToken)
-    {
-        if (!TryGetBearerToken(out bearerToken))
-        {
-            return Unauthorized(new ProblemDetails
-            {
-                Title = "Missing bearer token",
-                Detail = "Provide an Authorization header in the form 'Bearer {token}'."
             });
         }
 

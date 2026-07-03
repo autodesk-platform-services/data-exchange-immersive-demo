@@ -304,11 +304,7 @@ public static class UsdzConverter
             var a = obj.Positions[face.Corners[0].Position];
             var b = obj.Positions[face.Corners[1].Position];
             var c = obj.Positions[face.Corners[2].Position];
-            var normal = Vector3.Cross(b - a, c - a);
-            if (normal.LengthSquared() > 1e-12f)
-            {
-                return Vector3.Normalize(normal);
-            }
+            return ObjModel.ComputeNormal(a, b, c);
         }
 
         return Vector3.UnitY;

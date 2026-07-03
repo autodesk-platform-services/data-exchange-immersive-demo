@@ -2,6 +2,8 @@ using System.Diagnostics;
 
 namespace DataExchangeViewingService.Services;
 
+// TODO: temporary instrumentation for investigating the memory consumption of the extraction and
+// conversion pipeline; remove once that investigation is done.
 internal sealed class MemoryTelemetry(ILogger logger, string operation)
 {
     public IDisposable Step(string stepName)

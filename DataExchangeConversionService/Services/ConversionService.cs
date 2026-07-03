@@ -8,7 +8,7 @@ using System.Text.Json;
 
 namespace DataExchangeViewingService.Services;
 
-public sealed class ConversionService : IConversionService
+public sealed class ConversionService
 {
     private const string MetadataFileName = "metadata.json";
     private const string LogFileName = "log.txt";
@@ -103,25 +103,35 @@ public sealed class ConversionService : IConversionService
         string outputFolder,
         ConversionMetadata metadata)
     {
-        using var logger = new ConversionLogger(_logger, Path.Combine(outputFolder, LogFileName));
+        var logPath = Path.Combine(outputFolder, LogFileName);
 
         // Track the step so a failure anywhere along the pipeline can be pinpointed from the
         // logs and from the metadata written back to disk.
         var currentStep = "initializing conversion";
-        logger.LogInformation("Starting OBJ conversion.");
+
+        void Log(string message)
+        {
+            _logger.LogInformation(message);
+            File.AppendAllText(logPath, $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
+        }
+
+        void Step(string description)
+        {
+            currentStep = description;
+            Log($"Step: {description}.");
+        }
+
+        Log("Starting OBJ conversion.");
 
         try
         {
-            currentStep = "creating Data Exchange client";
-            logger.LogInformation("Step: {Step}.", currentStep);
+            Step("creating Data Exchange client");
             var client = CreateClient(bearerToken);
 
-            currentStep = "fetching exchange details";
-            logger.LogInformation("Step: {Step}.", currentStep);
+            Step("fetching exchange details");
             var details = await client.GetExchangeDetailsAsync(exchangeUrn);
 
-            currentStep = "downloading exchange as OBJ";
-            logger.LogInformation("Step: {Step}.", currentStep);
+            Step("downloading exchange as OBJ");
             var response = client.DownloadCompleteExchangeAsOBJ(
                 details.ExchangeID,
                 details.CollectionID,
@@ -129,22 +139,20 @@ public sealed class ConversionService : IConversionService
                 CancellationToken.None);
 
             var tempFolder = response.Value;
-            logger.LogInformation("Data Exchange extraction completed.");
+            Log("Data Exchange extraction completed.");
 
             foreach (var sourcePath in Directory.GetFiles(tempFolder))
             {
                 var fileName = Path.GetFileName(sourcePath);
                 var destinationPath = Path.Combine(outputFolder, fileName);
-                currentStep = $"moving extracted artifact {fileName}";
-                logger.LogInformation("Step: {Step}.", currentStep);
+                Step($"moving extracted artifact {fileName}");
                 File.Move(sourcePath, destinationPath, overwrite: true);
                 metadata.Artifacts.Add(fileName);
             }
 
-            currentStep = "deleting temp folder";
-            logger.LogInformation("Step: {Step}.", currentStep);
+            Step("deleting temp folder");
             Directory.Delete(tempFolder, recursive: true);
-            ForceFullGarbageCollection(logger, "Data Exchange to OBJ conversion");
+            ForceFullGarbageCollection(_logger, "Data Exchange to OBJ conversion");
 
             // Post-process each generated OBJ into a self-contained binary glTF (*.glb) and a
             // USDZ package (*.usdz).
@@ -156,10 +164,9 @@ public sealed class ConversionService : IConversionService
 
                 // The extraction emits Z-up geometry; rotate the OBJ to the Y-up convention that
                 // OBJ/glTF/USD viewers assume before deriving the GLB and USDZ artifacts from it.
-                var memory = new MemoryTelemetry(logger, "Exchange post-processing");
+                var memory = new MemoryTelemetry(_logger, "Exchange post-processing");
 
-                currentStep = $"rotating OBJ {objFileName} from Z-up to Y-up";
-                logger.LogInformation("Step: {Step}.", currentStep);
+                Step($"rotating OBJ {objFileName} from Z-up to Y-up");
                 using (memory.Step("rotate OBJ Z-up to Y-up"))
                 {
                     ObjModel.ConvertZUpToYUp(objPath);
@@ -167,36 +174,32 @@ public sealed class ConversionService : IConversionService
 
                 var glbFileName = Path.ChangeExtension(objFileName, ".glb");
                 var glbPath = Path.Combine(outputFolder, glbFileName);
-                currentStep = $"converting OBJ {objFileName} to GLB {glbFileName}";
-                logger.LogInformation("Step: {Step}.", currentStep);
+                Step($"converting OBJ {objFileName} to GLB {glbFileName}");
                 using (memory.Step("convert OBJ to GLB"))
                 {
-                    GltfConverter.ConvertObjToGlb(objPath, glbPath, logger);
+                    GltfConverter.ConvertObjToGlb(objPath, glbPath, _logger);
                 }
                 metadata.Artifacts.Add(glbFileName);
-                ForceFullGarbageCollection(logger, "OBJ to GLB conversion");
+                ForceFullGarbageCollection(_logger, "OBJ to GLB conversion");
 
                 var usdzFileName = Path.ChangeExtension(objFileName, ".usdz");
                 var usdzPath = Path.Combine(outputFolder, usdzFileName);
-                currentStep = $"converting OBJ {objFileName} to USDZ {usdzFileName}";
-                logger.LogInformation("Step: {Step}.", currentStep);
+                Step($"converting OBJ {objFileName} to USDZ {usdzFileName}");
                 using (memory.Step("convert OBJ to USDZ"))
                 {
-                    UsdzConverter.ConvertObjToUsdz(objPath, usdzPath, logger);
+                    UsdzConverter.ConvertObjToUsdz(objPath, usdzPath, _logger);
                 }
                 metadata.Artifacts.Add(usdzFileName);
-                ForceFullGarbageCollection(logger, "OBJ to USDZ conversion");
+                ForceFullGarbageCollection(_logger, "OBJ to USDZ conversion");
             }
 
             metadata.Status = ConversionStatus.Completed;
-            logger.LogInformation("OBJ conversion completed. Artifacts: {Artifacts}.", string.Join(", ", metadata.Artifacts));
+            Log($"OBJ conversion completed. Artifacts: {string.Join(", ", metadata.Artifacts)}.");
         }
         catch (Exception ex)
         {
-            logger.LogError(
-                ex,
-                "OBJ conversion failed while {Step}.",
-                currentStep);
+            _logger.LogError(ex, "OBJ conversion failed while {Step}.", currentStep);
+            File.AppendAllText(logPath, $"{DateTimeOffset.UtcNow:O} [Error] Failed while {currentStep}.{Environment.NewLine}{ex}{Environment.NewLine}");
 
             metadata.Status = ConversionStatus.Failed;
             // Persist the failing step and the full exception (type, message, stack trace,
@@ -206,6 +209,8 @@ public sealed class ConversionService : IConversionService
 
         WriteMetadata(outputFolder, metadata);
     }
+
+    // TODO: remove alongside MemoryTelemetry once the memory investigation is done.
 
     private static void ForceFullGarbageCollection(ILogger logger, string reason)
     {
@@ -224,15 +229,15 @@ public sealed class ConversionService : IConversionService
             afterBytes);
     }
 
-    private Client CreateClient(string bearerToken)
+    private static Client CreateClient(string bearerToken)
     {
         return new Client(new SDKOptionsDefaultSetup
         {
             ClientId = "pass-through",
-            ConnectorName = _options.ConnectorName,
-            ConnectorVersion = _options.ConnectorVersion,
-            HostApplicationName = _options.HostApplicationName,
-            HostApplicationVersion = _options.HostApplicationVersion,
+            ConnectorName = "DataExchangeViewingService",
+            ConnectorVersion = "1.0.0",
+            HostApplicationName = "DataExchangeViewingService",
+            HostApplicationVersion = "1.0.0",
             AuthProvider = new BearerTokenAuthProvider(bearerToken),
         });
     }
@@ -255,53 +260,6 @@ public sealed class ConversionService : IConversionService
     private static string CreateCacheKey(string exchangeUrn)
     {
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(exchangeUrn));
-    }
-
-    private sealed class ConversionLogger(ILogger innerLogger, string path) : ILogger, IDisposable
-    {
-        private readonly object _gate = new();
-
-        public IDisposable? BeginScope<TState>(TState state)
-            where TState : notnull
-        {
-            return innerLogger.BeginScope(state);
-        }
-
-        public bool IsEnabled(LogLevel logLevel)
-        {
-            return innerLogger.IsEnabled(logLevel);
-        }
-
-        public void Log<TState>(
-            LogLevel logLevel,
-            EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            innerLogger.Log(logLevel, eventId, state, exception, formatter);
-
-            var message = formatter(state, exception);
-            if (string.IsNullOrWhiteSpace(message) && exception is null)
-            {
-                return;
-            }
-
-            var line = $"{DateTimeOffset.UtcNow:O} [{logLevel}] {message}";
-            if (exception is not null)
-            {
-                line += Environment.NewLine + exception;
-            }
-
-            lock (_gate)
-            {
-                File.AppendAllText(path, line + Environment.NewLine);
-            }
-        }
-
-        public void Dispose()
-        {
-        }
     }
 
     // Deletes the folder and everything inside it.
