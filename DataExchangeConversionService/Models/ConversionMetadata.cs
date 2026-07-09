@@ -1,4 +1,4 @@
-namespace DataExchangeViewingService.Models;
+namespace DataExchangeConversionService.Models;
 
 // Persisted to metadata.json next to the generated artifacts.
 public sealed class ConversionMetadata

@@ -3,7 +3,7 @@ using System.Text;
 using Autodesk.DataExchange.Core.Interface;
 using Autodesk.DataExchange.Core.Models;
 
-namespace DataExchangeViewingService.Services;
+namespace DataExchangeConversionService.Services;
 
 public sealed class BearerTokenAuthProvider : IAuth
 {

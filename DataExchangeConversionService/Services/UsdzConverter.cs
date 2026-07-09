@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Text;
 
-namespace DataExchangeViewingService.Services;
+namespace DataExchangeConversionService.Services;
 
 // Post-processes the OBJ (and optional MTL) artifacts produced by the Data Exchange geometry
 // extraction into a single, self-contained USDZ package (*.usdz).

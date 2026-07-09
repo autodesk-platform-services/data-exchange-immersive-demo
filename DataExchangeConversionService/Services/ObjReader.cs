@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Numerics;
 
-namespace DataExchangeViewingService.Services;
+namespace DataExchangeConversionService.Services;
 
 // Streaming reader for a Wavefront OBJ file, shared by the glTF and USDZ post-processors. Mesh
 // groups ("g") are discovered on the fly as ReadGroups() is enumerated; referenced .mtl files

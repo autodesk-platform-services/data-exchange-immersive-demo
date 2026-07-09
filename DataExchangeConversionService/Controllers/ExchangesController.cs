@@ -1,8 +1,8 @@
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
-using DataExchangeViewingService.Services;
+using DataExchangeConversionService.Services;
 
-namespace DataExchangeViewingService.Controllers;
+namespace DataExchangeConversionService.Controllers;
 
 [ApiController]
 [Route("api/exchanges")]
@@ -19,10 +19,7 @@ public sealed class ExchangesController : ControllerBase
     [HttpGet("{exchangeUrn}")]
     public async Task<IActionResult> GetStatus(string exchangeUrn)
     {
-        if (await RequireExchangeAccessAsync(exchangeUrn) is { } denied)
-        {
-            return denied;
-        }
+        if (await CheckAccessAsync(exchangeUrn) is { } denied) { return denied; }
 
         var status = _conversionService.GetStatus(exchangeUrn);
         return status is null ? NotFound() : Ok(status);
@@ -32,13 +29,10 @@ public sealed class ExchangesController : ControllerBase
     [HttpPost("{exchangeUrn}")]
     public async Task<IActionResult> StartConversion(string exchangeUrn)
     {
-        if (await RequireExchangeAccessAsync(exchangeUrn) is { } denied)
-        {
-            return denied;
-        }
+        if (await CheckAccessAsync(exchangeUrn) is { } denied) { return denied; }
 
         TryGetBearerToken(out var bearerToken);
-        if (!_conversionService.StartObjConversion(exchangeUrn, bearerToken))
+        if (_conversionService.GetStatus(exchangeUrn) is not null)
         {
             return Conflict(new ProblemDetails
             {
@@ -47,6 +41,7 @@ public sealed class ExchangesController : ControllerBase
                 Status = StatusCodes.Status409Conflict
             });
         }
+        _conversionService.StartObjConversion(exchangeUrn, bearerToken);
 
         return Accepted($"/api/exchanges/{exchangeUrn}");
     }
@@ -55,10 +50,7 @@ public sealed class ExchangesController : ControllerBase
     [HttpDelete("{exchangeUrn}")]
     public async Task<IActionResult> DeleteConversion(string exchangeUrn)
     {
-        if (await RequireExchangeAccessAsync(exchangeUrn) is { } denied)
-        {
-            return denied;
-        }
+        if (await CheckAccessAsync(exchangeUrn) is { } denied) { return denied; }
 
         _conversionService.DeleteObjConversion(exchangeUrn);
         return Ok();
@@ -69,17 +61,14 @@ public sealed class ExchangesController : ControllerBase
     [Produces("model/obj", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
     public async Task<IActionResult> GetArtifact(string exchangeUrn, string artifact)
     {
-        if (await RequireExchangeAccessAsync(exchangeUrn) is { } denied)
-        {
-            return denied;
-        }
+        if (await CheckAccessAsync(exchangeUrn) is { } denied) { return denied; }
 
         var file = _conversionService.GetArtifact(exchangeUrn, artifact);
         return file is null ? NotFound() : File(file.Content, file.ContentType, file.FileName);
     }
 
     // Returns an error result unless a bearer token with access to the exchange is present, otherwise null.
-    private async Task<IActionResult?> RequireExchangeAccessAsync(string exchangeUrn)
+    private async Task<IActionResult?> CheckAccessAsync(string exchangeUrn)
     {
         if (!TryGetBearerToken(out var bearerToken))
         {

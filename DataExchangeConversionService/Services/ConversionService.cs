@@ -1,12 +1,12 @@
-using DataExchangeViewingService.Models;
-using DataExchangeViewingService.Options;
+using DataExchangeConversionService.Models;
+using DataExchangeConversionService.Options;
 using Autodesk.DataExchange;
 using Microsoft.Extensions.Options;
 using System.Runtime;
 using System.Text;
 using System.Text.Json;
 
-namespace DataExchangeViewingService.Services;
+namespace DataExchangeConversionService.Services;
 
 public sealed class ConversionService
 {
@@ -50,12 +50,12 @@ public sealed class ConversionService
             : null;
     }
 
-    public bool StartObjConversion(string exchangeUrn, string bearerToken)
+    public void StartObjConversion(string exchangeUrn, string bearerToken)
     {
         var outputFolder = GetExchangeOutputFolder(exchangeUrn);
         if (Directory.Exists(outputFolder))
         {
-            return false;
+            throw new InvalidOperationException($"Conversion already in progress for exchange {exchangeUrn}. Delete the current conversion first if you want to start it again.");
         }
 
         Directory.CreateDirectory(outputFolder);
@@ -69,7 +69,6 @@ public sealed class ConversionService
         };
         WriteMetadata(outputFolder, metadata);
         _ = Task.Run(() => RunObjConversionAsync(exchangeUrn, bearerToken, outputFolder, metadata));
-        return true;
     }
 
     public void DeleteObjConversion(string exchangeUrn)

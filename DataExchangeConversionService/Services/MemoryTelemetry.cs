@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 
-namespace DataExchangeViewingService.Services;
+namespace DataExchangeConversionService.Services;
 
 // TODO: temporary instrumentation for investigating the memory consumption of the extraction and
 // conversion pipeline; remove once that investigation is done.

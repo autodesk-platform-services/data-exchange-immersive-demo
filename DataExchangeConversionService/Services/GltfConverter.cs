@@ -11,7 +11,7 @@ using VERTEX = SharpGLTF.Geometry.VertexBuilder<
     SharpGLTF.Geometry.VertexTypes.VertexTexture1,
     SharpGLTF.Geometry.VertexTypes.VertexEmpty>;
 
-namespace DataExchangeViewingService.Services;
+namespace DataExchangeConversionService.Services;
 
 // Post-processes the OBJ (and optional MTL) artifacts produced by the Data Exchange
 // geometry extraction into a single, self-contained binary glTF (*.glb) file.
