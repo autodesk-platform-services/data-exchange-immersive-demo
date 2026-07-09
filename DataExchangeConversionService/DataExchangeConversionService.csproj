@@ -16,11 +16,25 @@
 		<PackageReference Include="System.Drawing.Common" Version="11.0.0-preview.5.26302.115" />
 	</ItemGroup>
 
-	<ItemGroup>
-		<Content Include="Scripts\usdz_to_crate.py">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-		</Content>
-	</ItemGroup>
+	<Target Name="IncludeNativeServicesInPublish" BeforeTargets="ComputeFilesToPublish">
+		<ItemGroup>
+			<_GeometryUtilitiesServiceFiles Include="$(OutDir)GeometryUtilitiesService\**\*.*" />
+			<_ParameterServiceFiles Include="$(OutDir)ParameterService\**\*.*" />
+			<_FeatureFlagManagerFiles Include="$(OutDir)FeatureFlagManager\**\*.*" />
+
+			<ResolvedFileToPublish Include="@(_GeometryUtilitiesServiceFiles)">
+				<RelativePath>GeometryUtilitiesService\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+				<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+			</ResolvedFileToPublish>
+			<ResolvedFileToPublish Include="@(_ParameterServiceFiles)">
+				<RelativePath>ParameterService\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+				<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+			</ResolvedFileToPublish>
+			<ResolvedFileToPublish Include="@(_FeatureFlagManagerFiles)">
+				<RelativePath>FeatureFlagManager\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+				<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+			</ResolvedFileToPublish>
+		</ItemGroup>
+	</Target>
 
 </Project>
