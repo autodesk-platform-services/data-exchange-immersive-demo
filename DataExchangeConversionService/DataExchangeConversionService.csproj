@@ -7,13 +7,16 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Autodesk.DataExchange" Version="7.4.0-beta" />
-		<PackageReference Include="Autodesk.DataExchange.GeometryDefinitions" Version="0.1.12" />
-		<PackageReference Include="Autodesk.Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="ForgeParameters_win_release_intel64_v140" Version="4.0.1" />
-		<PackageReference Include="ForgeUnits_win_release_intel64_v140" Version="5.3.2" />
+	  <Compile Remove="data\**" />
+	  <Content Remove="data\**" />
+	  <EmbeddedResource Remove="data\**" />
+	  <None Remove="data\**" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Autodesk.DataExchange" Version="7.5.0-beta" />
+		<PackageReference Include="Autodesk.DataExchange.GeometryDefinitions" Version="0.9.3" />
 		<PackageReference Include="SharpGLTF.Toolkit" Version="1.0.6" />
-		<PackageReference Include="System.Drawing.Common" Version="11.0.0-preview.5.26302.115" />
 	</ItemGroup>
 
 	<Target Name="IncludeNativeServicesInPublish" BeforeTargets="ComputeFilesToPublish">
