@@ -94,4 +94,4 @@ Authorization: Bearer {{AccessToken}}
 
 ## Deploying to Azure
 
-TBD
+See [docs/deploying-to-azure.md](../docs/deploying-to-azure.md).
