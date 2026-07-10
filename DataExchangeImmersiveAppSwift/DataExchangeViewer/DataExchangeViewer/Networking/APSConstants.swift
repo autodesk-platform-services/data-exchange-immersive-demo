@@ -15,5 +15,5 @@ enum APSConstants {
 }
 
 enum ConversionServiceConstants {
-    static let baseURL = URL(string: "https://data-exchange-viewing-service.azurewebsites.net")!
+    static let baseURL = URL(string: "https://data-exchange-conversion-service.azurewebsites.net")!
 }
