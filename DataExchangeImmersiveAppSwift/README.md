@@ -2,6 +2,8 @@
 
 Native visionOS/SwiftUI application for browsing [Data Exchanges](https://aps.autodesk.com/data-exchange-cover-page) from Autodesk Platform Services and previewing the converted 3D models in a spatial-computing context on Apple Vision Pro.
 
+https://github.com/user-attachments/assets/613bb471-c902-4c0a-8494-4d2d084a5526
+
 ## What it does
 
 - Signs in with an Autodesk account via OAuth 2.0 PKCE (`ASWebAuthenticationSession`).
