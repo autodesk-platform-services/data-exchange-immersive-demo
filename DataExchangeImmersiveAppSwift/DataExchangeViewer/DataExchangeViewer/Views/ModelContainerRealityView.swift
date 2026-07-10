@@ -15,6 +15,13 @@ import RealityKit
 struct ModelContainerRealityView: View {
     let fileURL: URL?
     let withBackground: Bool
+    /// Lets the user drag the whole loaded model to reposition it, regardless of which of its
+    /// (possibly deeply nested) child meshes the drag actually started on. Off by default since
+    /// the volumetric mode already gets richer manipulation for free via `ManipulationComponent`.
+    var enableDragToReposition: Bool = false
+    /// Passed straight to the loaded entity's accessibility label so VoiceOver can announce and
+    /// select the model by name, e.g. in the volumetric window.
+    var modelAccessibilityLabel: String?
     let prepare: (Entity) -> Void
 
     @State private var root = Entity()
@@ -37,10 +44,25 @@ struct ModelContainerRealityView: View {
                 modelContainer.addChild(loadedEntity)
             }
         }
+        .gesture(
+            DragGesture()
+                .targetedToEntity(modelContainer)
+                .onChanged { value in
+                    guard enableDragToReposition, let parent = modelContainer.parent else { return }
+                    modelContainer.position = value.convert(value.location3D, from: .local, to: parent)
+                }
+        )
         .task(id: fileURL) {
             loadedEntity = nil
             guard let fileURL, let entity = try? await Entity(contentsOf: fileURL) else { return }
             prepare(entity)
+            if let modelAccessibilityLabel {
+                entity.isAccessibilityElement = true
+                // accessibilityLabelKey is a LocalizedStringResource, not a plain String — wrapping
+                // the whole value in one interpolation renders it verbatim, since exchange names
+                // are runtime user data, not something to look up in a strings table.
+                entity.accessibilityLabelKey = LocalizedStringResource("\(modelAccessibilityLabel)")
+            }
             loadedEntity = entity
         }
     }

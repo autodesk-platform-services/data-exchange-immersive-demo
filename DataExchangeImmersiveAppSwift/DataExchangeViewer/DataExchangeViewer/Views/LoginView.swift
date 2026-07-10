@@ -24,6 +24,7 @@ struct LoginView: View {
             } label: {
                 if auth.isBusy {
                     ProgressView()
+                        .accessibilityLabel("Signing in")
                 } else {
                     Text("Login with Autodesk")
                 }

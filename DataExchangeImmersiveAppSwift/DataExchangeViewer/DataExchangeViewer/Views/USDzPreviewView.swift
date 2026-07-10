@@ -8,6 +8,11 @@ import RealityKit
 
 struct USDzPreviewView: View {
     let fileURL: URL?
+    /// The exchange's display name, threaded down to `PreviewModePicker` so volumetric/immersive
+    /// mode can give the loaded RealityKit entity a meaningful VoiceOver label.
+    let modelName: String
+    /// Shown in place of the portal when `.logs` is the active mode.
+    let logText: String
     @Environment(AppModel.self) private var appModel
     @State private var root = Entity()
     @State private var portalWorldEntity = Entity()
@@ -27,7 +32,9 @@ struct USDzPreviewView: View {
 
     var body: some View {
         Group {
-            if fileURL == nil {
+            if appModel.activeMode == .logs {
+                LogView(text: logText)
+            } else if fileURL == nil {
                 ContentUnavailableView("Run a conversion to preview", systemImage: "cube")
             } else {
                 ZStack(alignment: .bottom) {
@@ -69,6 +76,12 @@ struct USDzPreviewView: View {
                                 .padding()
                                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                         }
+                    } else if appModel.isTransitioning {
+                        // Dismissing/opening a window or immersive space are separate windowing
+                        // surfaces with their own lifecycles, so a true cross-fade isn't possible —
+                        // this is an honest "something's happening" state for the gap between them.
+                        ProgressView("Switching view…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         // Explicitly sized so its centered content doesn't get pulled down to the
                         // ZStack's `.bottom` alignment, where it would overlap the controls below.
@@ -78,19 +91,14 @@ struct USDzPreviewView: View {
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-
-                    HStack(spacing: 16) {
-                        PreviewModePicker(fileURL: fileURL)
-                        QuickLookButton(fileURL: fileURL)
-                    }
-                    .padding()
-                    // A shared glass backdrop so the controls stay legible over the portal's
-                    // RealityView content instead of just the picker's selected segment
-                    // providing contrast.
-                    .glassBackgroundEffect()
-                    .padding(.bottom)
                 }
             }
+        }
+        // Attached to the outer Group (not just the portal branch) so the mode picker — including
+        // Logs — stays reachable even before a file exists or while viewing the log.
+        .ornament(attachmentAnchor: .scene(.bottom)) {
+            PreviewModePicker(fileURL: fileURL, modelName: modelName)
+                .padding()
         }
         .task(id: fileURL) {
             loadedEntity = nil

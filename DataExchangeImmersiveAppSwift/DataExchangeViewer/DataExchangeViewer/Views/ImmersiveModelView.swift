@@ -11,24 +11,48 @@ import RealityKit
 struct ImmersiveModelView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ModelContainerRealityView(
             fileURL: appModel.previewModelURL,
             withBackground: true,
+            enableDragToReposition: true,
+            modelAccessibilityLabel: appModel.previewModelName,
             prepare: Self.prepareForImmersiveViewing
         )
         // An ornament (rather than the flat window's button) so the exit control is always
         // reachable, even when the model's own geometry — placed at real-world scale in `.full`
         // immersion — ends up occluding the window it was opened from.
         .ornament(attachmentAnchor: .scene(.bottom)) {
-            Button {
-                Task { @MainActor in
-                    appModel.immersiveSpaceState = .inTransition
-                    await dismissImmersiveSpace()
+            HStack {
+                // Only offered when the immersive space is showing the same file the volumetric
+                // window last showed — otherwise "back" would silently switch to a different model.
+                if let previewModelURL = appModel.previewModelURL,
+                   appModel.lastVolumetricFileURL == previewModelURL {
+                    Button {
+                        Task { @MainActor in
+                            appModel.immersiveSpaceState = .inTransition
+                            await dismissImmersiveSpace()
+                            openWindow(id: appModel.volumetricWindowID, value: previewModelURL)
+                            appModel.isVolumetricWindowOpen = true
+                        }
+                    } label: {
+                        Label("Back to Inspect", systemImage: "move.3d")
+                    }
+                    .accessibilityHint("Closes the walkthrough and reopens this model in the Inspect window")
                 }
-            } label: {
-                Label("Exit", systemImage: "arrow.down.right.and.arrow.up.left")
+
+                Button {
+                    Task { @MainActor in
+                        appModel.immersiveSpaceState = .inTransition
+                        await dismissImmersiveSpace()
+                    }
+                } label: {
+                    Label("Exit", systemImage: "arrow.down.right.and.arrow.up.left")
+                }
+                .accessibilityLabel("Exit walkthrough")
+                .accessibilityHint("Closes the full immersive view and returns to the previous screen")
             }
             .padding()
         }
@@ -59,5 +83,10 @@ struct ImmersiveModelView: View {
         let scaledHalfDepth = halfDepth * scale
         let standoffDistance = max(scaledHalfDepth + 2, 3)
         entity.position = SIMD3<Float>(-scaledCenter.x, -bounds.min.y * scale, -scaledCenter.z - standoffDistance)
+
+        // Needed for the drag-to-reposition gesture in ModelContainerRealityView to hit-test
+        // against this entity (or any of its nested child meshes).
+        entity.generateCollisionShapes(recursive: true)
+        entity.components.set(InputTargetComponent())
     }
 }

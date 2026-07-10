@@ -16,21 +16,21 @@ struct ExchangeDetailView: View {
     }
 
     var body: some View {
-        TabView {
-            USDzPreviewView(fileURL: conversion.cachedUSDzURL)
-                .tabItem { Label("Preview", systemImage: "cube.transparent") }
-            LogView(text: conversion.logText)
-                .tabItem { Label("Log", systemImage: "doc.plaintext") }
-        }
-        .navigationTitle(exchange.name)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                convertClearControl
+        // Preview/Logs used to be separate TabView tabs; both are now segments of the mode
+        // picker inside USDzPreviewView's ornament, so this is the view's only content.
+        USDzPreviewView(fileURL: conversion.cachedUSDzURL, modelName: exchange.name, logText: conversion.logText)
+            .navigationTitle(exchange.name)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    HStack {
+                        convertClearControl
+                        QuickLookButton(fileURL: conversion.cachedUSDzURL)
+                    }
+                }
             }
-        }
-        .task(id: exchange.id) {
-            await conversion.start(auth: auth)
-        }
+            .task(id: exchange.id) {
+                await conversion.start(auth: auth)
+            }
     }
 
     @ViewBuilder
@@ -44,7 +44,10 @@ struct ExchangeDetailView: View {
             Label("Converting…", systemImage: "hourglass")
                 .labelStyle(.titleAndIcon)
         case .completed:
-            Button("Clear", role: .destructive) { Task { await conversion.clear(auth: auth) } }
+            Button(role: .destructive) { Task { await conversion.clear(auth: auth) } } label: {
+                Label("Clear", systemImage: "trash")
+            }
+            .labelStyle(.iconOnly)
         case .failed(let message):
             VStack(alignment: .trailing, spacing: 2) {
                 Button("Retry") { Task { await conversion.convert(auth: auth) } }
