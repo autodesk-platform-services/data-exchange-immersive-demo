@@ -38,10 +38,15 @@ struct RootView: View {
 
 struct MainSplitView: View {
     @State private var selectedProject: Project?
+    // Pin the sidebar open. With the default `.automatic` visibility the split view can launch
+    // collapsed to detail-only (e.g. via state restoration), leaving just the "Select a project"
+    // placeholder in a tiny window with no way to reach the sidebar.
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(selectedProject: $selectedProject)
+                .navigationSplitViewColumnWidth(min: 320, ideal: 360)
         } detail: {
             if let selectedProject {
                 ExchangeListView(project: selectedProject)
@@ -50,5 +55,6 @@ struct MainSplitView: View {
                 ContentUnavailableView("Select a project", systemImage: "folder")
             }
         }
+        .navigationSplitViewStyle(.balanced)
     }
 }

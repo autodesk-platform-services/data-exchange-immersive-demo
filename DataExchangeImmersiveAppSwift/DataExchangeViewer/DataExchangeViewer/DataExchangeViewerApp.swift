@@ -19,7 +19,6 @@ struct DataExchangeViewerApp: App {
                 .environment(appModel)
         }
         .defaultSize(width: 1280, height: 800)
-        .windowResizability(.contentSize)
 
         WindowGroup(id: appModel.volumetricWindowID, for: URL.self) { fileURLBinding in
             VolumetricModelView(fileURL: fileURLBinding.wrappedValue)
