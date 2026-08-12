@@ -2,7 +2,7 @@
 
 Browser-based client for browsing [Data Exchanges](https://aps.autodesk.com/data-exchange-cover-page) from Autodesk Platform Services and previewing the converted 3D models directly in the browser, including on visionOS Safari.
 
-https://github.com/user-attachments/assets/7fd1c604-eb14-4301-8c39-2a9b7d44dfeb
+https://github.com/user-attachments/assets/88a5cf8f-8007-4c51-8882-077ebaa0a0e1
 
 ## What it does
 
