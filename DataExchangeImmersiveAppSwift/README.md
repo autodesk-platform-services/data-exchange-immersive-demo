@@ -2,7 +2,7 @@
 
 Native visionOS/SwiftUI application for browsing [Data Exchanges](https://aps.autodesk.com/data-exchange-cover-page) from Autodesk Platform Services and previewing the converted 3D models in a spatial-computing context on Apple Vision Pro.
 
-https://github.com/user-attachments/assets/613bb471-c902-4c0a-8494-4d2d084a5526
+https://github.com/user-attachments/assets/b665195a-1842-4110-9c81-524b529ecf94
 
 ## What it does
 
