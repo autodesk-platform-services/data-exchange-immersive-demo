@@ -6,6 +6,9 @@ Simple ASP.NET application extracting geometry data from [Data Exchanges](https:
 
 The application is deployed to an Azure Web App. Here's how you can try it out:
 
+> [!WARNING]
+> The live server at `data-exchange-conversion-service.azurewebsites.net` is a demo deployment and may only be available occasionally (e.g. scaled down or stopped between demos). If requests to it start timing out or failing, run the service locally instead — see [Running locally](#running-locally) below.
+
 ### Extracting geometry from an exchange
 
 ```curl

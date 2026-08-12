@@ -38,3 +38,6 @@ https://github.com/user-attachments/assets/613bb471-c902-4c0a-8494-4d2d084a5526
 - Open `DataExchangeViewer/DataExchangeViewer.xcodeproj` in Xcode.
 - Select a visionOS Simulator (or a paired Apple Vision Pro) as the run destination and build & run.
 - Sign in with an Autodesk account that has access to a hub/project containing at least one Data Exchange.
+- Select an exchange and tap **Convert** to send it to the conversion service; the button becomes **Converting…** until the USDZ artifact (or an error) comes back.
+
+The app points at the hosted Azure deployment of the conversion service by default (see `ConversionServiceConstants` in `Networking/APSConstants.swift`). To run against a local instance instead, change that constant and see [`DataExchangeConversionService`](../DataExchangeConversionService/) for how to run it yourself.
