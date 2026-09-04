@@ -9,6 +9,7 @@ struct ExchangeDetailView: View {
     let exchange: Exchange
     @Environment(AuthManager.self) private var auth
     @State private var conversion: ConversionStore
+    @State private var isShowingConversionLog = false
 
     init(exchange: Exchange) {
         self.exchange = exchange
@@ -16,16 +17,34 @@ struct ExchangeDetailView: View {
     }
 
     var body: some View {
-        // Preview/Logs used to be separate TabView tabs; both are now segments of the mode
-        // picker inside USDzPreviewView's ornament, so this is the view's only content.
-        USDzPreviewView(fileURL: conversion.cachedUSDzURL, modelName: exchange.name, logText: conversion.logText)
+        USDzPreviewView(fileURL: conversion.cachedUSDzURL, modelName: exchange.name)
             .navigationTitle(exchange.name)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     HStack {
                         convertClearControl
                         QuickLookButton(fileURL: conversion.cachedUSDzURL)
+                        Menu {
+                            Button {
+                                isShowingConversionLog = true
+                            } label: {
+                                Label("Conversion Log", systemImage: "doc.plaintext")
+                            }
+                        } label: {
+                            Label("More", systemImage: "ellipsis.circle")
+                        }
                     }
+                }
+            }
+            .sheet(isPresented: $isShowingConversionLog) {
+                NavigationStack {
+                    LogView(text: conversion.logText)
+                        .navigationTitle("Conversion Log")
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { isShowingConversionLog = false }
+                            }
+                        }
                 }
             }
             .task(id: exchange.id) {

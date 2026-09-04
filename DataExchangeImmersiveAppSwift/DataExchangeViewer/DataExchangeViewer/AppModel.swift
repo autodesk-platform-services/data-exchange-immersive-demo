@@ -5,6 +5,7 @@
 
 import Foundation
 import SwiftUI
+import RealityKit
 
 @MainActor
 @Observable
@@ -15,55 +16,66 @@ final class AppModel {
         case open
     }
 
-    /// The ways a model (or its conversion log) can be shown. Only one is ever active at a time.
+    /// The three stages of the spatial preview. Place and Enter share one immersive scene so
+    /// switching between them preserves the loaded entity and its placement.
     enum PreviewMode: Equatable {
         /// A framed opening in the flat window, viewed from outside.
-        case portal
-        /// A bounded volumetric window the model floats in, viewed up close and manipulated by hand.
-        case volumetric
-        /// A full immersive space, replacing the user's surroundings, sized for walking through.
-        case immersive
-        /// The conversion log, shown in the flat window in place of the portal.
-        case logs
+        case peek
+        /// A tabletop-scale model placed directly in the person's surroundings.
+        case place
+        /// The same model expanded to architectural scale for walking through.
+        case enter
     }
 
     let immersiveSpaceID = "ImmersiveModelSpace"
-    let volumetricWindowID = "VolumetricModelSpace"
 
     var immersiveSpaceState: ImmersiveSpaceState = .closed
-    var isVolumetricWindowOpen = false
+    var selectedPreviewMode: PreviewMode = .peek
 
-    /// True for the whole dismiss-then-open sequence in `PreviewModePicker.select(_:)`, including
-    /// legs that have no async system call of their own (e.g. switching to `.portal`), so the UI
-    /// has one flag to show a "switching" state regardless of which mode is involved.
+    /// Bound to the single ImmersiveSpace scene. Place uses mixed immersion; Enter uses
+    /// progressive immersion so the Digital Crown remains the system-native comfort control.
+    var immersionStyle: any ImmersionStyle = MixedImmersionStyle()
+    var isFullImmersion = false
+
+    /// True for the whole asynchronous open/dismiss sequence, so controls don't accept another
+    /// mode selection while the system is still changing scene presentation.
     var isSwitchingMode = false
 
-    /// The USDZ file the volumetric window or immersive space should display, set right before opening either.
+    /// The USDZ file the immersive space should display, set right before opening it.
     var previewModelURL: URL?
 
     /// The exchange name paired with `previewModelURL`, used only to give the loaded RealityKit
     /// entity a meaningful VoiceOver label — not needed for the file to load or display.
     var previewModelName: String?
 
-    /// The file most recently shown in the volumetric window, used to decide whether "Back to
-    /// Inspect" from the immersive space would reopen the same model or a different one.
-    var lastVolumetricFileURL: URL?
+    /// The last hand-authored tabletop placement. ImmersiveModelView captures it before Enter or
+    /// dismissal and restores it when the person returns to Place.
+    var placedModelTransform: Transform?
 
-    /// Set when `.logs` is selected in the flat window. Only meaningful when neither the
-    /// volumetric window nor the immersive space is open — those two always take priority.
-    var isShowingLogs = false
+    var activeMode: PreviewMode { selectedPreviewMode }
 
-    var activeMode: PreviewMode {
-        if immersiveSpaceState != .closed { return .immersive }
-        if isVolumetricWindowOpen { return .volumetric }
-        return isShowingLogs ? .logs : .portal
-    }
-
-    /// The in-window portal is hidden whenever another presentation mode is active (or transitioning),
-    /// so only one of portal, volumetric, or full immersion is visible at a time.
-    var isPortalVisible: Bool { activeMode == .portal }
+    /// The in-window portal is hidden while Place or Enter owns the spatial presentation.
+    var isPeekVisible: Bool { activeMode == .peek && immersiveSpaceState == .closed }
 
     /// Whether a mode switch (of any kind) is currently in flight, for UI that should disable
     /// input or show a transitional state while it's ambiguous which mode is active.
     var isTransitioning: Bool { immersiveSpaceState == .inTransition || isSwitchingMode }
+
+    func setPreviewModel(url: URL, name: String) {
+        if previewModelURL != url {
+            placedModelTransform = nil
+        }
+        previewModelURL = url
+        previewModelName = name
+    }
+
+    func immersiveSpaceDidClose() {
+        immersiveSpaceState = .closed
+        selectedPreviewMode = .peek
+        // A new Place session should start in front of the person's current position. Placement is
+        // retained while switching Place <-> Enter, but not after explicitly returning to Peek.
+        placedModelTransform = nil
+        isFullImmersion = false
+        immersionStyle = MixedImmersionStyle()
+    }
 }

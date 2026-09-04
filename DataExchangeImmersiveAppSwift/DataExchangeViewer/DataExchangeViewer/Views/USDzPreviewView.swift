@@ -8,11 +8,9 @@ import RealityKit
 
 struct USDzPreviewView: View {
     let fileURL: URL?
-    /// The exchange's display name, threaded down to `PreviewModePicker` so volumetric/immersive
-    /// mode can give the loaded RealityKit entity a meaningful VoiceOver label.
+    /// The exchange's display name, threaded down to the immersive preview so the loaded
+    /// RealityKit entity has a meaningful VoiceOver label.
     let modelName: String
-    /// Shown in place of the portal when `.logs` is the active mode.
-    let logText: String
     @Environment(AppModel.self) private var appModel
     @State private var root = Entity()
     @State private var portalWorldEntity = Entity()
@@ -32,13 +30,11 @@ struct USDzPreviewView: View {
 
     var body: some View {
         Group {
-            if appModel.activeMode == .logs {
-                LogView(text: logText)
-            } else if fileURL == nil {
+            if fileURL == nil {
                 ContentUnavailableView("Run a conversion to preview", systemImage: "cube")
             } else {
                 ZStack(alignment: .bottom) {
-                    if appModel.isPortalVisible {
+                    if appModel.isPeekVisible {
                         GeometryReader3D { geometry in
                             RealityView { content in
                                 portalWorldEntity.components.set(WorldComponent())
@@ -46,7 +42,7 @@ struct USDzPreviewView: View {
                                 root.addChild(portalWorldEntity)
 
                                 if let environment = try? await StudioLighting.makeEnvironment() {
-                                    try? StudioLighting.apply(environment, to: portalWorldEntity)
+                                    StudioLighting.apply(environment, to: portalWorldEntity)
                                 }
 
                                 portalPlane.components.set(PortalComponent(target: portalWorldEntity))
@@ -86,16 +82,16 @@ struct USDzPreviewView: View {
                         // Explicitly sized so its centered content doesn't get pulled down to the
                         // ZStack's `.bottom` alignment, where it would overlap the controls below.
                         ContentUnavailableView(
-                            appModel.activeMode == .immersive ? "Viewing in full space" : "Viewing in a separate window",
-                            systemImage: appModel.activeMode == .immersive ? "figure.walk" : "move.3d"
+                            appModel.activeMode == .enter ? "Inside the model" : "Placed in your space",
+                            systemImage: appModel.activeMode == .enter ? "figure.walk" : "move.3d"
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }
         }
-        // Attached to the outer Group (not just the portal branch) so the mode picker — including
-        // Logs — stays reachable even before a file exists or while viewing the log.
+        // Attached to the outer Group so Peek remains available while the spatial scene is open,
+        // and Place/Enter remain visible (but disabled) before a conversion exists.
         .ornament(attachmentAnchor: .scene(.bottom)) {
             PreviewModePicker(fileURL: fileURL, modelName: modelName)
                 .padding()

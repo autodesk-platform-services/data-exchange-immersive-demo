@@ -5,24 +5,24 @@
 
 import RealityKit
 import CoreGraphics
-import ImageIO
 import UIKit
 
-/// Lights previewed USDZ models with a bundled HDRI so they read as lit objects in a
-/// real environment instead of floating in an unlit void.
+/// Provides neutral lighting and a plain backdrop for previewed USDZ models.
 enum StudioLighting {
     /// Radius of the visible background sphere, in meters. Exposed so callers can size content
     /// to stay comfortably within it instead of poking through its surface.
-    static let backgroundSphereRadius: Float = 50
+    // Enter can contain building-scale geometry placed in front of the wearer. Keep the backdrop
+    // comfortably beyond that content so its surface never becomes a clipping boundary.
+    static let backgroundSphereRadius: Float = 500
 
     static func makeEnvironment() async throws -> EnvironmentResource {
-        try await EnvironmentResource(equirectangular: environmentImage)
+        try await EnvironmentResource(equirectangular: neutralEnvironmentImage)
     }
 
-    /// Adds an image-based light sourced from `environment` so entities added under `root` are lit,
-    /// and — when `withBackground` is true — a large inward-facing sphere textured with the same
-    /// HDRI so the environment is visible as a backdrop instead of an empty void.
-    static func apply(_ environment: EnvironmentResource, to root: Entity, withBackground: Bool = true) throws {
+    /// Adds uniform image-based light so PBR materials remain legible without suggesting a
+    /// particular physical environment. Peek also receives the white backdrop here; Enter owns
+    /// the same backdrop separately so Place can keep passthrough visible.
+    static func apply(_ environment: EnvironmentResource, to root: Entity, withBackground: Bool = true) {
         let lightEntity = Entity()
         var component = ImageBasedLightComponent(source: .single(environment))
         component.inheritsRotation = true
@@ -31,27 +31,41 @@ enum StudioLighting {
         root.addChild(lightEntity)
 
         if withBackground {
-            root.addChild(try makeBackgroundSphere())
+            root.addChild(makeBackgroundEntity())
         }
     }
 
-    private static func makeBackgroundSphere() throws -> ModelEntity {
-        let texture = try TextureResource(image: environmentImage, options: .init(semantic: .color))
+    /// Creates the plain backdrop separately so the shared immersive scene can show it for Enter
+    /// and hide it for mixed-space Place.
+    static func makeBackgroundEntity() -> ModelEntity {
         var material = UnlitMaterial()
-        material.color = .init(tint: .white, texture: .init(texture))
+        material.color = .init(tint: .white)
         material.faceCulling = .none
         return ModelEntity(mesh: .generateSphere(radius: backgroundSphereRadius), materials: [material])
     }
 
-    /// The bundled equirectangular HDRI, used both to light previewed models and as their
-    /// visible backdrop. Loaded once and cached, since it's a large 4K image.
-    private static let environmentImage: CGImage = {
-        guard
-            let url = Bundle.main.url(forResource: "golden_gate_hills_4k", withExtension: "exr"),
-            let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else {
-            fatalError("Failed to load the bundled environment map.")
+    /// A tiny, generated 2:1 map supplies shadow-free white IBL without bundling or displaying
+    /// a photographic environment image.
+    private static let neutralEnvironmentImage: CGImage = {
+        let width = 32
+        let height = 16
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            fatalError("Failed to create the neutral lighting environment.")
+        }
+
+        context.setFillColor(UIColor.white.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let image = context.makeImage() else {
+            fatalError("Failed to render the neutral lighting environment.")
         }
         return image
     }()
