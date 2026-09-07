@@ -5,8 +5,9 @@
 //  - Connection types wrap their items in a `results` array (not Relay edges/node).
 //  - `projects` takes a plain `hubId` string argument.
 //  - Exchanges live under folders: project -> folders -> exchanges.
-//  - The exchange's file/lineage URN is exposed via `alternativeRepresentations`, NOT an
-//    `attributes { exchangeFileUrn }` object.
+//  - The exchange's file/lineage URN is exposed via `alternativeIdentifiers`, NOT an
+//    `attributes { exchangeFileUrn }` object. (`alternativeRepresentations` is the same shape
+//    but deprecated in the schema.)
 
 const GRAPHQL_URL = "https://developer.api.autodesk.com/dataexchange/2023-05/graphql";
 
@@ -75,7 +76,7 @@ export async function getProjects(token: string, hubId: string): Promise<Project
 interface RawExchange {
   id: string;
   name: string;
-  alternativeRepresentations?: { fileUrn?: string; fileVersionUrn?: string } | null;
+  alternativeIdentifiers?: { fileUrn?: string; fileVersionUrn?: string } | null;
 }
 
 interface RawFolder {
@@ -87,8 +88,8 @@ function toExchange(exchange: RawExchange): Exchange {
   return {
     id: exchange.id,
     name: exchange.name,
-    fileUrn: exchange.alternativeRepresentations?.fileUrn ?? "",
-    fileVersionUrn: exchange.alternativeRepresentations?.fileVersionUrn ?? "",
+    fileUrn: exchange.alternativeIdentifiers?.fileUrn ?? "",
+    fileVersionUrn: exchange.alternativeIdentifiers?.fileVersionUrn ?? "",
   };
 }
 
@@ -99,7 +100,7 @@ export async function getExchanges(token: string, projectId: string): Promise<Ex
       results {
         id
         name
-        alternativeRepresentations { fileUrn fileVersionUrn }
+        alternativeIdentifiers { fileUrn fileVersionUrn }
       }
     }`;
   const data = await graphql<{ project: { folders: Results<RawFolder> } }>(
