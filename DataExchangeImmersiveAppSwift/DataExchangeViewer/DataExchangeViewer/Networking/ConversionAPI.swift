@@ -9,11 +9,13 @@ struct ConversionAPI {
     private static let pathSegmentAllowed = CharacterSet(charactersIn:
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
-    private func artifactEndpoint(urn: String, fileName: String) -> URL {
+    // Not private: percent-encoding a URN into a path is subtle enough that
+    // `ConversionEndpointTests` checks it directly.
+    func artifactEndpoint(urn: String, fileName: String) -> URL {
         endpoint(urn: urn).appendingPathComponent(fileName)
     }
 
-    private func endpoint(urn: String) -> URL {
+    func endpoint(urn: String) -> URL {
         // `appendingPathComponent` would double-encode an already percent-encoded segment
         // (it treats '%' itself as a character needing escaping), so the URL is built from
         // a raw string instead of layering `appendingPathComponent` on top of `encoded`.

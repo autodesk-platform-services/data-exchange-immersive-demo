@@ -123,7 +123,9 @@ final class USDzCache {
         }
     }
 
-    private static func fileName(for exchangeUrn: String) -> String {
+    /// Not private: `CacheKeyTests` checks the derivation directly, since a collision or an
+    /// unstable key would show up as one exchange serving another's geometry.
+    static func fileName(for exchangeUrn: String) -> String {
         let digest = SHA256.hash(data: Data(exchangeUrn.utf8))
         return digest.map { String(format: "%02x", $0) }.joined() + ".usdz"
     }

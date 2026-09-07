@@ -28,15 +28,6 @@ struct ImmersiveModelView: View {
     @State private var worldTracking = WorldTrackingProvider()
     @State private var flight = FlightController()
 
-    /// Caps exceptionally large source geometry independently of the backdrop size. Since the
-    /// model's nearest face is placed in front of the wearer, its farthest face can be roughly
-    /// twice this distance away; 150 m leaves ample clearance inside the 500 m white sphere.
-    private static let maximumEnteredModelReach: Float = 150
-    /// Scales small geometry up instead. Entering a 20 cm mechanical part at authored scale left
-    /// a 20 cm object floating two metres away inside a white sphere with nothing to fly through,
-    /// so Enter was effectively a no-op below room scale. Four metres is small enough to take in
-    /// at a glance and large enough to move around inside.
-    private static let minimumEnteredModelReach: Float = 4
     private static let manipulationHintKey = "hasSeenPlacedModelManipulationHint"
     @AppStorage(Self.manipulationHintKey) private var hasSeenManipulationHint = false
     @State private var showManipulationHint = false
@@ -255,7 +246,10 @@ struct ImmersiveModelView: View {
             flight.halt()
             let deviceTransform = await currentDeviceTransform()
             loadedEntity.move(
-                to: Self.enteredTransform(for: loadedEntity, relativeTo: deviceTransform),
+                to: ModelPlacement.enteredTransform(
+                    bounds: loadedEntity.visualBounds(relativeTo: loadedEntity),
+                    relativeTo: deviceTransform
+                ),
                 relativeTo: loadedEntity.parent,
                 duration: 0.35,
                 timingFunction: .easeInOut
@@ -269,7 +263,7 @@ struct ImmersiveModelView: View {
         let transform = provider
             .queryDeviceAnchor(atTimestamp: CACurrentMediaTime())
             .flatMap { $0.isTracked ? Transform(matrix: $0.originFromAnchorTransform) : nil }
-        return viewerFrame(from: transform).forward
+        return ModelPlacement.viewerFrame(from: transform).forward
     }
 
     @MainActor
@@ -375,8 +369,10 @@ struct ImmersiveModelView: View {
             return
 
         case .place:
+            let bounds = entity.visualBounds(relativeTo: entity)
             target = appModel.placedModelTransform
-                ?? Self.defaultPlacedTransform(for: entity, relativeTo: deviceTransform)
+                ?? ModelPlacement.placedTransform(bounds: bounds, relativeTo: deviceTransform)
+                ?? entity.transform
             ManipulationComponent.configureEntity(entity)
             if var manipulation = entity.components[ManipulationComponent.self] {
                 manipulation.releaseBehavior = .stay
@@ -385,12 +381,13 @@ struct ImmersiveModelView: View {
 
         case .enter:
             entity.components.remove(ManipulationComponent.self)
-            let entered = Self.enteredTransform(for: entity, relativeTo: deviceTransform)
+            let bounds = entity.visualBounds(relativeTo: entity)
+            let entered = ModelPlacement.enteredTransform(bounds: bounds, relativeTo: deviceTransform)
             target = entered
             // Flight speed follows the size the model will have in the scene, so it's the local
             // extents times the scale Enter just chose. Read from the target transform rather
             // than from world bounds, which the move below may not have applied yet.
-            let extents = entity.visualBounds(relativeTo: entity).extents
+            let extents = bounds.extents
             flight.setTarget(entity, span: max(extents.x, extents.y, extents.z) * entered.scale.x)
         }
 
@@ -399,88 +396,6 @@ struct ImmersiveModelView: View {
         } else {
             entity.transform = target
         }
-    }
-
-    /// Places the model's center at a comfortable tabletop height and scales its largest dimension
-    /// to 65 cm, leaving it close enough for direct hand interaction.
-    private static func defaultPlacedTransform(
-        for entity: Entity,
-        relativeTo deviceTransform: Transform?
-    ) -> Transform {
-        let bounds = entity.visualBounds(relativeTo: entity)
-        let maxDimension = max(bounds.extents.x, bounds.extents.y, bounds.extents.z)
-        guard maxDimension > 0 else { return entity.transform }
-
-        let scale: Float = 0.65 / maxDimension
-        let viewer = viewerFrame(from: deviceTransform)
-        let rotation = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: viewer.forward)
-        let desiredCenter = viewer.position + viewer.forward * 1.2 + SIMD3<Float>(0, -0.25, 0)
-        let scaledCenter = rotation.act(bounds.center * scale)
-        return Transform(
-            scale: SIMD3<Float>(repeating: scale),
-            rotation: rotation,
-            translation: desiredCenter - scaledCenter
-        )
-    }
-
-    /// Brings the model to a scale someone can walk through, stands its lowest point on the
-    /// floor, and places the nearest face two meters in front of the person so they begin
-    /// outside the geometry. A building-sized model keeps its authored scale.
-    private static func enteredTransform(
-        for entity: Entity,
-        relativeTo deviceTransform: Transform?
-    ) -> Transform {
-        let bounds = entity.visualBounds(relativeTo: entity)
-        let halfWidth = bounds.extents.x / 2
-        let halfDepth = bounds.extents.z / 2
-        let height = bounds.extents.y
-        let reach = (halfWidth * halfWidth + height * height + halfDepth * halfDepth).squareRoot()
-
-        // Clamped in both directions: a site model is brought inside the backdrop, and anything
-        // smaller than a room is scaled up to a size worth walking through. Only clamping
-        // downwards made Enter a no-op for small parts.
-        let scale: Float
-        if reach < 0.0001 {
-            scale = 1
-        } else if reach < minimumEnteredModelReach {
-            scale = minimumEnteredModelReach / reach
-        } else if reach > maximumEnteredModelReach {
-            scale = maximumEnteredModelReach / reach
-        } else {
-            scale = 1
-        }
-        let viewer = viewerFrame(from: deviceTransform)
-        let rotation = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: viewer.forward)
-
-        // Put the center of the model's nearest face two meters ahead of the wearer. The y
-        // translation remains floor-relative so the building stays upright and grounded.
-        let desiredFront = viewer.position + viewer.forward * 2
-        let localFront = SIMD3<Float>(bounds.center.x, 0, bounds.center.z + halfDepth) * scale
-        let rotatedFront = rotation.act(localFront)
-
-        return Transform(
-            scale: SIMD3<Float>(repeating: scale),
-            rotation: rotation,
-            translation: SIMD3<Float>(
-                desiredFront.x - rotatedFront.x,
-                -bounds.min.y * scale,
-                desiredFront.z - rotatedFront.z
-            )
-        )
-    }
-
-    /// Uses only the wearer's yaw so buildings remain vertical even when the person looks up or
-    /// down. The fallback matches visionOS's conventional initial immersive coordinate frame.
-    private static func viewerFrame(from transform: Transform?) -> (position: SIMD3<Float>, forward: SIMD3<Float>) {
-        guard let transform else {
-            return (SIMD3<Float>(0, 1.6, 0), SIMD3<Float>(0, 0, -1))
-        }
-
-        let forward3D = -transform.matrix.columns.2
-        let horizontal = SIMD3<Float>(forward3D.x, 0, forward3D.z)
-        let length = simd_length(horizontal)
-        let forward = length > 0.001 ? horizontal / length : SIMD3<Float>(0, 0, -1)
-        return (transform.translation, forward)
     }
 }
 

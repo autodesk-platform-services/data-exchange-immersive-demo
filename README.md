@@ -10,6 +10,6 @@ The repository is organized into three independent components:
 
 - [`DataExchangeImmersiveAppWeb/`](DataExchangeImmersiveAppWeb/) — Browser-based client (Bun + React + TypeScript) for logging into Autodesk Platform Services, browsing available exchanges, and previewing the converted models. It renders geometry three ways: the APS Viewer, Google's `<model-viewer>` web component for GLB, and Safari/visionOS's native `<model>` element for USDZ.
 
-- [`DataExchangeImmersiveAppSwift/`](DataExchangeImmersiveAppSwift/) — Native visionOS/SwiftUI application for previewing data exchanges from Autodesk Platform Services in an immersive, spatial-computing context. It authenticates via OAuth PKCE, lets users browse hubs, projects, exchanges, and displays them in `Model3D` views.
+- [`DataExchangeImmersiveAppSwift/`](DataExchangeImmersiveAppSwift/) — Native visionOS/SwiftUI application (visionOS 27) for previewing data exchanges from Autodesk Platform Services in an immersive, spatial-computing context. It authenticates via OAuth PKCE, lets users browse hubs, projects, and exchanges, and previews the converted USDZ three ways with RealityKit: through a portal in the window (Peek), at tabletop scale in the room (Place), or at walk-through scale in an immersive space (Enter).
 
 Each component has its own README with setup and usage details.

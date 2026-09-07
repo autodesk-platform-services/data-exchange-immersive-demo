@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		67BA2FAA2FF69900004E8D50 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 67BA2F7A2FF69805004E8D50 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 67BA2F812FF69805004E8D50;
+			remoteInfo = DataExchangeViewer;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		67BA2F822FF69805004E8D50 /* DataExchangeViewer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DataExchangeViewer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		67BA2FA12FF69900004E8D50 /* DataExchangeViewerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DataExchangeViewerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -29,10 +40,22 @@
 			path = DataExchangeViewer;
 			sourceTree = "<group>";
 		};
+		67BA2FA22FF69900004E8D50 /* DataExchangeViewerTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DataExchangeViewerTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		67BA2F7F2FF69805004E8D50 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		67BA2FA42FF69900004E8D50 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -46,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				67BA2F842FF69805004E8D50 /* DataExchangeViewer */,
+				67BA2FA22FF69900004E8D50 /* DataExchangeViewerTests */,
 				67BA2F832FF69805004E8D50 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +78,7 @@
 			isa = PBXGroup;
 			children = (
 				67BA2F822FF69805004E8D50 /* DataExchangeViewer.app */,
+				67BA2FA12FF69900004E8D50 /* DataExchangeViewerTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -81,6 +106,27 @@
 			productReference = 67BA2F822FF69805004E8D50 /* DataExchangeViewer.app */;
 			productType = "com.apple.product-type.application";
 		};
+		67BA2FA02FF69900004E8D50 /* DataExchangeViewerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 67BA2FA62FF69900004E8D50 /* Build configuration list for PBXNativeTarget "DataExchangeViewerTests" */;
+			buildPhases = (
+				67BA2FA32FF69900004E8D50 /* Sources */,
+				67BA2FA42FF69900004E8D50 /* Frameworks */,
+				67BA2FA52FF69900004E8D50 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				67BA2FA92FF69900004E8D50 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				67BA2FA22FF69900004E8D50 /* DataExchangeViewerTests */,
+			);
+			name = DataExchangeViewerTests;
+			productName = DataExchangeViewerTests;
+			productReference = 67BA2FA12FF69900004E8D50 /* DataExchangeViewerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -93,6 +139,10 @@
 				TargetAttributes = {
 					67BA2F812FF69805004E8D50 = {
 						CreatedOnToolsVersion = 26.6;
+					};
+					67BA2FA02FF69900004E8D50 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 67BA2F812FF69805004E8D50;
 					};
 				};
 			};
@@ -111,12 +161,20 @@
 			projectRoot = "";
 			targets = (
 				67BA2F812FF69805004E8D50 /* DataExchangeViewer */,
+				67BA2FA02FF69900004E8D50 /* DataExchangeViewerTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		67BA2F802FF69805004E8D50 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		67BA2FA52FF69900004E8D50 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -133,7 +191,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		67BA2FA32FF69900004E8D50 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		67BA2FA92FF69900004E8D50 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 67BA2F812FF69805004E8D50 /* DataExchangeViewer */;
+			targetProxy = 67BA2FAA2FF69900004E8D50 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		67BA2F922FF69807004E8D50 /* Debug */ = {
@@ -266,7 +339,7 @@
 				SDKROOT = xros;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				XROS_DEPLOYMENT_TARGET = 26.5;
+				XROS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Debug;
 		};
@@ -323,7 +396,51 @@
 				SDKROOT = xros;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
-				XROS_DEPLOYMENT_TARGET = 26.5;
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Release;
+		};
+		67BA2FA72FF69900004E8D50 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DFFY54VP64;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = PetrBroz.DataExchangeViewerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DataExchangeViewer.app/DataExchangeViewer";
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Debug;
+		};
+		67BA2FA82FF69900004E8D50 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DFFY54VP64;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = PetrBroz.DataExchangeViewerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DataExchangeViewer.app/DataExchangeViewer";
+				XROS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Release;
 		};
@@ -344,6 +461,15 @@
 			buildConfigurations = (
 				67BA2F922FF69807004E8D50 /* Debug */,
 				67BA2F932FF69807004E8D50 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		67BA2FA62FF69900004E8D50 /* Build configuration list for PBXNativeTarget "DataExchangeViewerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				67BA2FA72FF69900004E8D50 /* Debug */,
+				67BA2FA82FF69900004E8D50 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

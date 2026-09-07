@@ -8,10 +8,11 @@ visionOS 27 and Xcode 27 are currently beta. Validate API names, availability, p
 
 ### Establish a validated visionOS 27 baseline
 
-- [ ] Install Xcode 27 and the visionOS 27 SDK/runtime.
-- [ ] Reconcile the project-level visionOS 26.5 and target-level visionOS 27.0 deployment settings.
-- [ ] Decide whether the app should require visionOS 27 or retain visionOS 26 compatibility through availability gates.
+- [x] Install Xcode 27 and the visionOS 27 SDK/runtime.
+- [x] Reconcile the project-level visionOS 26.5 and target-level visionOS 27.0 deployment settings. Both are now 27.0.
+- [x] Decide whether the app should require visionOS 27 or retain visionOS 26 compatibility through availability gates. It requires visionOS 27: this is a demo of what the current platform can do, and availability-gating every spatial API for one release of back-compatibility would cost more than it buys.
 - [ ] Migrate toward Swift 6 strict-concurrency validation.
+- [x] Add a unit-test target covering the pure logic — placement math, PKCE, cache keys, URN encoding, conversion state, and error presentation. See the app README's Tests section.
 - [ ] Add CI builds and a simulator/device validation matrix.
 
 **Value:** Foundational  
@@ -219,7 +220,7 @@ Each experiment should have a time box and a measurable go/no-go criterion.
 
 ## Recommended sequence
 
-1. Validate Xcode/SDK 27 and harden delivery, caching, errors, and tests.
+1. Validate Xcode/SDK 27 and harden delivery, caching, errors, and tests. *(Done, apart from CI and the Swift 6 strict-concurrency migration.)*
 2. Implement the USDKit index and structured inspection MVP.
 3. Add LOD/compression/occlusion and establish on-device performance budgets.
 4. Add mixed immersion, lighting, and projective overlays.
