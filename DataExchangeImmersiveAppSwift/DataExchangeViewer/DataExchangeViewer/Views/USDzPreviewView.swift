@@ -11,6 +11,10 @@ struct USDzPreviewView: View {
     /// The exchange's display name, threaded down to the immersive preview so the loaded
     /// RealityKit entity has a meaningful VoiceOver label.
     let modelName: String
+    /// Why there is no model to show yet. `fileURL` alone can't distinguish "still checking"
+    /// from "nothing converted yet" from "the conversion failed", and those need different
+    /// messages — see `unavailableContent`.
+    let conversionState: ConversionState
     @Environment(AppModel.self) private var appModel
     @State private var root = Entity()
     @State private var portalWorldEntity = Entity()
@@ -31,7 +35,7 @@ struct USDzPreviewView: View {
     var body: some View {
         Group {
             if fileURL == nil {
-                ContentUnavailableView("Run a conversion to preview", systemImage: "cube")
+                unavailableContent
             } else {
                 ZStack(alignment: .bottom) {
                     if appModel.isPeekVisible {
@@ -107,6 +111,39 @@ struct USDzPreviewView: View {
             } catch {
                 loadError = "Failed to load preview: \(error.localizedDescription)"
             }
+        }
+    }
+
+    /// Shown in place of the preview whenever there is no USDZ to display. The transient states
+    /// (checking, converting) get a spinner because they resolve on their own; the terminal ones
+    /// get a `ContentUnavailableView` because they need the person to do something.
+    @ViewBuilder
+    private var unavailableContent: some View {
+        switch conversionState {
+        case .checking:
+            ProgressView("Checking the exchange status")
+
+        case .running:
+            VStack(spacing: 8) {
+                ProgressView("Converting to USDZ")
+                Text("Large exchanges can take a few minutes. The conversion log is available from the toolbar menu.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding()
+
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("Conversion failed", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(message)
+            }
+
+        // `.completed` without a file URL isn't reachable today (the store publishes the URL
+        // before the state), but it falls back to the actionable message rather than a spinner.
+        case .notConverted, .completed:
+            ContentUnavailableView("Run a conversion to preview", systemImage: "cube")
         }
     }
 

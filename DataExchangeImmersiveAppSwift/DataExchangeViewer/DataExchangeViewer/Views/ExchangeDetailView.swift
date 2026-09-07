@@ -17,7 +17,11 @@ struct ExchangeDetailView: View {
     }
 
     var body: some View {
-        USDzPreviewView(fileURL: conversion.cachedUSDzURL, modelName: exchange.name)
+        USDzPreviewView(
+            fileURL: conversion.cachedUSDzURL,
+            modelName: exchange.name,
+            conversionState: conversion.state
+        )
             .navigationTitle(exchange.name)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -67,13 +71,10 @@ struct ExchangeDetailView: View {
                 Label("Clear", systemImage: "trash")
             }
             .labelStyle(.iconOnly)
-        case .failed(let message):
-            VStack(alignment: .trailing, spacing: 2) {
-                Button("Retry") { Task { await conversion.convert(auth: auth) } }
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+        // The failure message itself is shown in the preview area, so the toolbar only needs
+        // to offer the recovery action.
+        case .failed:
+            Button("Retry") { Task { await conversion.convert(auth: auth) } }
         }
     }
 }
