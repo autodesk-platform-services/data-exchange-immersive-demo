@@ -50,3 +50,35 @@ struct GraphQLClient {
         return payload
     }
 }
+
+/// The hub, project, and exchange lists all report failures by showing `localizedDescription`,
+/// so these are the messages behind "Failed to load hubs" and its siblings.
+extension GraphQLError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .http(401, _):
+            return "Your session expired."
+        case .http(403, _):
+            return "You don't have access to this data."
+        case .http(let status, _):
+            return "Autodesk Data Exchange returned an unexpected response (HTTP \(status))."
+        // The service reports several messages for one query; the first is the actionable one
+        // and the rest are usually the same failure restated per field.
+        case .graphQL(let messages):
+            return messages.first ?? "Autodesk Data Exchange reported an error."
+        case .noData:
+            return "Autodesk Data Exchange returned no data."
+        }
+    }
+
+    var recoverySuggestion: String? {
+        switch self {
+        case .http(401, _):
+            return "Sign in again to continue."
+        case .http(403, _):
+            return "Ask the hub or project administrator to grant you access."
+        case .http, .graphQL, .noData:
+            return "Try again in a moment."
+        }
+    }
+}

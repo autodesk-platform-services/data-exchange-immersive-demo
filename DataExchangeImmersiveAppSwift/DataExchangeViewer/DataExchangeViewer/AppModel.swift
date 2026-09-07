@@ -18,7 +18,7 @@ final class AppModel {
 
     /// The three stages of the spatial preview. Place and Enter share one immersive scene so
     /// switching between them preserves the loaded entity and its placement.
-    enum PreviewMode: Equatable {
+    enum PreviewMode: Hashable {
         /// A framed opening in the flat window, viewed from outside.
         case peek
         /// A tabletop-scale model placed directly in the person's surroundings.

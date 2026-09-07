@@ -22,26 +22,20 @@ struct ImmersiveModelView: View {
     @State private var loadError: String?
     @State private var arkitSession = ARKitSession()
     @State private var worldTracking = WorldTrackingProvider()
+    @State private var flight = FlightController()
 
     /// Caps exceptionally large source geometry independently of the backdrop size. Since the
     /// model's nearest face is placed in front of the wearer, its farthest face can be roughly
     /// twice this distance away; 150 m leaves ample clearance inside the 500 m white sphere.
     private static let maximumEnteredModelReach: Float = 150
-    /// Small repeated steps feel continuous when a button is held, while a single press remains
-    /// useful for precise positioning near walls and doorways.
-    private static let flightStep: Float = 0.3
+    /// Scales small geometry up instead. Entering a 20 cm mechanical part at authored scale left
+    /// a 20 cm object floating two metres away inside a white sphere with nothing to fly through,
+    /// so Enter was effectively a no-op below room scale. Four metres is small enough to take in
+    /// at a glance and large enough to move around inside.
+    private static let minimumEnteredModelReach: Float = 4
     private static let manipulationHintKey = "hasSeenPlacedModelManipulationHint"
     @AppStorage(Self.manipulationHintKey) private var hasSeenManipulationHint = false
     @State private var showManipulationHint = false
-
-    private enum FlightDirection {
-        case forward
-        case backward
-        case left
-        case right
-        case up
-        case down
-    }
 
     var body: some View {
         RealityView { content in
@@ -53,6 +47,12 @@ struct ImmersiveModelView: View {
                 StudioLighting.apply(environment, to: root, withBackground: false)
             }
             backgroundContainer.addChild(StudioLighting.makeBackgroundEntity())
+
+            // `make` runs once, so flight subscribes to the scene update exactly once. The
+            // provider is captured directly rather than through `self` so the closure doesn't
+            // depend on a view struct that SwiftUI re-creates on every invalidation.
+            let tracking = worldTracking
+            flight.attach(to: content) { Self.viewerForward(from: tracking) }
         } update: { _ in
             backgroundContainer.isEnabled = appModel.activeMode == .enter
 
@@ -117,6 +117,10 @@ struct ImmersiveModelView: View {
             withAnimation { showManipulationHint = true }
             try? await Task.sleep(for: .seconds(4))
             withAnimation { showManipulationHint = false }
+            // `try?` swallows cancellation, so leaving Place inside the four-second window used
+            // to fall straight through to here and retire the hint after it had been on screen
+            // for a fraction of a second. Only a full showing counts as having seen it.
+            guard !Task.isCancelled else { return }
             hasSeenManipulationHint = true
         }
         .onChange(of: appModel.activeMode) { oldMode, newMode in
@@ -134,6 +138,7 @@ struct ImmersiveModelView: View {
             if appModel.activeMode == .place, let loadedEntity {
                 appModel.placedModelTransform = loadedEntity.transform
             }
+            flight.setTarget(nil)
             arkitSession.stop()
             appModel.immersiveSpaceDidClose()
         }
@@ -179,61 +184,54 @@ struct ImmersiveModelView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+
+            speedPicker
         }
         .padding(10)
         .glassBackgroundEffect()
     }
 
+    /// The model's own size sets the base speed, but what someone wants differs between
+    /// inspecting an interior and covering a site, so the multiplier stays their choice.
+    private var speedPicker: some View {
+        Picker("Speed", selection: $flight.speed) {
+            ForEach(FlightController.Speed.allCases) { speed in
+                Text(speed.title).tag(speed)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .accessibilityLabel("Flight speed")
+    }
+
     private func flightButton(
         _ title: String,
         systemImage: String,
-        direction: FlightDirection
+        direction: FlightController.Direction
     ) -> some View {
         Button {
-            fly(direction)
+            // Only reached by an activation that reported no press — see `FlightController.nudge`.
+            flight.nudge(direction)
         } label: {
             Label(title, systemImage: systemImage)
                 .labelStyle(.iconOnly)
         }
-        .buttonRepeatBehavior(.enabled)
-        .accessibilityHint("Press and hold for continuous movement")
-    }
-
-    @MainActor
-    private func fly(_ direction: FlightDirection) {
-        guard appModel.activeMode == .enter, let loadedEntity else { return }
-
-        let deviceTransform = worldTracking
-            .queryDeviceAnchor(atTimestamp: CACurrentMediaTime())
-            .flatMap { $0.isTracked ? Transform(matrix: $0.originFromAnchorTransform) : nil }
-        let viewer = Self.viewerFrame(from: deviceTransform)
-        let up = SIMD3<Float>(0, 1, 0)
-        let right = simd_normalize(simd_cross(viewer.forward, up))
-
-        let travelDirection: SIMD3<Float>
-        switch direction {
-        case .forward:
-            travelDirection = viewer.forward
-        case .backward:
-            travelDirection = -viewer.forward
-        case .left:
-            travelDirection = -right
-        case .right:
-            travelDirection = right
-        case .up:
-            travelDirection = up
-        case .down:
-            travelDirection = -up
-        }
-
-        // The wearer is the camera on visionOS, so virtual locomotion moves the world opposite
-        // the intended direction of travel.
-        loadedEntity.position -= travelDirection * Self.flightStep
+        .buttonStyle(HoldToFlyButtonStyle { isPressed in
+            if isPressed {
+                flight.hold(direction)
+            } else {
+                flight.release(direction)
+            }
+        })
+        .accessibilityHint("Hold to fly continuously, or activate once to move a short step")
     }
 
     private func resetEntrance() {
         Task { @MainActor in
             guard appModel.activeMode == .enter, let loadedEntity else { return }
+            // The animated move below and the per-frame flight update write the same transform.
+            flight.halt()
             let deviceTransform = await currentDeviceTransform()
             loadedEntity.move(
                 to: Self.enteredTransform(for: loadedEntity, relativeTo: deviceTransform),
@@ -242,6 +240,15 @@ struct ImmersiveModelView: View {
                 timingFunction: .easeInOut
             )
         }
+    }
+
+    /// The wearer's current heading, read straight from the device anchor. Cheap enough to call
+    /// once a frame, which is what lets someone steer mid-flight by turning their head.
+    private static func viewerForward(from provider: WorldTrackingProvider) -> SIMD3<Float> {
+        let transform = provider
+            .queryDeviceAnchor(atTimestamp: CACurrentMediaTime())
+            .flatMap { $0.isTracked ? Transform(matrix: $0.originFromAnchorTransform) : nil }
+        return viewerFrame(from: transform).forward
     }
 
     @MainActor
@@ -269,6 +276,8 @@ struct ImmersiveModelView: View {
     private func loadModel() async {
         loadedEntity = nil
         loadError = nil
+        // Nothing to fly through until the replacement finishes loading.
+        flight.setTarget(nil)
         guard let fileURL = appModel.previewModelURL else { return }
 
         // ARKit session startup and reading the model are independent, so they run concurrently
@@ -311,6 +320,12 @@ struct ImmersiveModelView: View {
         relativeTo deviceTransform: Transform?,
         animated: Bool
     ) {
+        // Flight belongs to Enter alone, and every Enter recomputes it below, so this leaves the
+        // controller holding a model exactly while Enter owns the presentation.
+        if mode != .enter {
+            flight.setTarget(nil)
+        }
+
         let target: Transform
 
         switch mode {
@@ -328,7 +343,13 @@ struct ImmersiveModelView: View {
 
         case .enter:
             entity.components.remove(ManipulationComponent.self)
-            target = Self.enteredTransform(for: entity, relativeTo: deviceTransform)
+            let entered = Self.enteredTransform(for: entity, relativeTo: deviceTransform)
+            target = entered
+            // Flight speed follows the size the model will have in the scene, so it's the local
+            // extents times the scale Enter just chose. Read from the target transform rather
+            // than from world bounds, which the move below may not have applied yet.
+            let extents = entity.visualBounds(relativeTo: entity).extents
+            flight.setTarget(entity, span: max(extents.x, extents.y, extents.z) * entered.scale.x)
         }
 
         if animated {
@@ -360,8 +381,9 @@ struct ImmersiveModelView: View {
         )
     }
 
-    /// Keeps the building near authored scale, stands its lowest point on the floor, and places
-    /// the nearest face two meters in front of the person so they begin outside the geometry.
+    /// Brings the model to a scale someone can walk through, stands its lowest point on the
+    /// floor, and places the nearest face two meters in front of the person so they begin
+    /// outside the geometry. A building-sized model keeps its authored scale.
     private static func enteredTransform(
         for entity: Entity,
         relativeTo deviceTransform: Transform?
@@ -371,7 +393,20 @@ struct ImmersiveModelView: View {
         let halfDepth = bounds.extents.z / 2
         let height = bounds.extents.y
         let reach = (halfWidth * halfWidth + height * height + halfDepth * halfDepth).squareRoot()
-        let scale = reach > maximumEnteredModelReach ? maximumEnteredModelReach / reach : 1
+
+        // Clamped in both directions: a site model is brought inside the backdrop, and anything
+        // smaller than a room is scaled up to a size worth walking through. Only clamping
+        // downwards made Enter a no-op for small parts.
+        let scale: Float
+        if reach < 0.0001 {
+            scale = 1
+        } else if reach < minimumEnteredModelReach {
+            scale = minimumEnteredModelReach / reach
+        } else if reach > maximumEnteredModelReach {
+            scale = maximumEnteredModelReach / reach
+        } else {
+            scale = 1
+        }
         let viewer = viewerFrame(from: deviceTransform)
         let rotation = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: viewer.forward)
 
@@ -404,5 +439,28 @@ struct ImmersiveModelView: View {
         let length = simd_length(horizontal)
         let forward = length > 0.001 ? horizontal / length : SIMD3<Float>(0, 0, -1)
         return (transform.translation, forward)
+    }
+}
+
+/// Reports its press state so flight can apply velocity for exactly as long as a control is held.
+///
+/// The flight buttons can't use `.buttonStyle(.bordered)` for this: a style's `isPressed` is the
+/// platform's own press tracking, and nothing else reports the beginning *and* end of a
+/// press-and-hold as reliably — which is the whole basis of holding to fly. It keeps
+/// `.hoverEffect()`, because on Vision Pro hover is the targeting feedback for eye tracking, and
+/// draws on a system material rather than a fixed color so it stays legible against passthrough.
+private struct HoldToFlyButtonStyle: ButtonStyle {
+    let onPressedChange: (Bool) -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.title3)
+            .frame(width: 44, height: 44)
+            .background(.thinMaterial, in: Circle())
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .hoverEffect()
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                onPressedChange(isPressed)
+            }
     }
 }

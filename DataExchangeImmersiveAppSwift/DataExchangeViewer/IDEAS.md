@@ -20,7 +20,8 @@ visionOS 27 and Xcode 27 are currently beta. Validate API names, availability, p
 ### Harden the USDZ delivery pipeline
 
 - [x] Stream artifacts directly to disk instead of materializing the entire USDZ as `Data`.
-- [ ] Expose download and conversion progress, cancellation, retry, and actionable errors.
+- [x] Expose download progress, conversion elapsed time, cancellation, retry, and actionable errors.
+- [ ] Report true conversion progress, which needs the service to publish a completion percentage.
 - [ ] Key cached artifacts by exchange version as well as exchange identity.
 - [ ] Replace discarded RealityKit loading errors and the HDRI `fatalError` with observable failure states.
 - [ ] Complete API pagination and define a safe strategy for deeply nested folders.

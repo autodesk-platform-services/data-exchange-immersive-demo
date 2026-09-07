@@ -83,10 +83,21 @@ struct ConversionAPI {
     /// Streams an artifact to a temporary file and returns its location; the caller owns the
     /// file from that point on. `data(for:)` would materialize the whole package in memory
     /// first — a 400 MB USDZ becomes a 400 MB `Data` before it is ever written to disk.
-    func downloadArtifact(urn: String, fileName: String, token: String) async throws -> URL {
+    ///
+    /// `onProgress` receives the bytes written so far and the total the service declared, when it
+    /// declared one. It is called on `URLSession`'s delegate queue rather than the main actor.
+    func downloadArtifact(
+        urn: String,
+        fileName: String,
+        token: String,
+        onProgress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }
+    ) async throws -> URL {
         var request = URLRequest(url: artifactEndpoint(urn: urn, fileName: fileName))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (fileURL, response) = try await URLSession.shared.download(for: request)
+        // Held in a local so the delegate outlives the call regardless of how strongly
+        // `URLSessionTask` happens to reference it.
+        let progress = DownloadProgressDelegate(onProgress: onProgress)
+        let (fileURL, response) = try await URLSession.shared.download(for: request, delegate: progress)
         let http = response as? HTTPURLResponse
         guard http?.statusCode == 200 else {
             // Error bodies are small, so reading this one back is safe — and it carries the
@@ -127,4 +138,40 @@ struct ConversionAPI {
     static func findArtifact(_ metadata: ConversionMetadata?, extension ext: String) -> String? {
         metadata?.artifacts.first { $0.hasSuffix(ext) }
     }
+}
+
+/// Reports byte counts for `URLSession.download(for:delegate:)`. A task-specific delegate is the
+/// only way to observe progress there — the async call itself just hands back the finished file —
+/// and a multi-hundred-megabyte BIM export is exactly the case where an indeterminate spinner
+/// isn't good enough.
+private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let onProgress: @Sendable (Int64, Int64?) -> Void
+
+    nonisolated init(onProgress: @escaping @Sendable (Int64, Int64?) -> Void) {
+        self.onProgress = onProgress
+        super.init()
+    }
+
+    nonisolated func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        // The expected total is `NSURLSessionTransferSizeUnknown` when the response carries no
+        // Content-Length, which the caller reports as an indeterminate download rather than 0%.
+        onProgress(
+            totalBytesWritten,
+            totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil
+        )
+    }
+
+    /// Required by `URLSessionDownloadDelegate`, but the async `download(for:delegate:)` returns
+    /// the downloaded file itself, so there is nothing to move here.
+    nonisolated func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {}
 }

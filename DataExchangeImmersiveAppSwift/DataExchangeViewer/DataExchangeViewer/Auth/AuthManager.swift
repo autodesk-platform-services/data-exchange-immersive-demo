@@ -15,10 +15,30 @@ final class AuthManager: NSObject, ASWebAuthenticationPresentationContextProvidi
     private(set) var isBusy = false
     private(set) var lastError: String?
 
+    /// Whether the sign-in web session starts without the Autodesk cookies the browser already
+    /// holds. It used to be hardcoded on, which is a reasonable privacy default on a shared
+    /// computer but means typing a full Autodesk username and password on a head-mounted device
+    /// every single time. Off by default — the app already keeps a refresh token in the keychain,
+    /// so a reusable browser session adds little on a personal device — and exposed as a setting
+    /// for anyone who does share theirs.
+    var usesEphemeralWebSession: Bool {
+        didSet {
+            UserDefaults.standard.set(usesEphemeralWebSession, forKey: Self.ephemeralWebSessionKey)
+        }
+    }
+
+    private static let ephemeralWebSessionKey = "usesEphemeralWebSession"
+
     private let tokenStore = TokenStore()
     private var tokens: StoredTokens?
     private var refreshTask: Task<Void, Error>?
     private var session: ASWebAuthenticationSession?
+
+    override init() {
+        // `bool(forKey:)` reads false for an absent key, which is the intended default.
+        usesEphemeralWebSession = UserDefaults.standard.bool(forKey: Self.ephemeralWebSessionKey)
+        super.init()
+    }
 
     func bootstrap() async {
         guard let stored = tokenStore.load() else { return }
@@ -44,7 +64,7 @@ final class AuthManager: NSObject, ASWebAuthenticationPresentationContextProvidi
             store(response)
             isAuthenticated = true
         } catch {
-            lastError = error.localizedDescription
+            lastError = error.userFacingDescription
         }
     }
 
@@ -52,6 +72,21 @@ final class AuthManager: NSObject, ASWebAuthenticationPresentationContextProvidi
         tokenStore.clear()
         tokens = nil
         isAuthenticated = false
+        lastError = nil
+    }
+
+    /// Clears the session when a service rejected a token the app believed was valid, so
+    /// `RootView` returns to the login screen — the only thing that actually resolves it.
+    /// Without this, every screen independently reports "Your session expired" and every
+    /// subsequent request keeps failing the same way. A no-op for any other failure, so it is
+    /// safe to call from any `catch`.
+    func signOutIfSessionExpired(_ error: Error) {
+        guard error.indicatesExpiredSession, isAuthenticated else { return }
+        tokenStore.clear()
+        tokens = nil
+        isAuthenticated = false
+        // Carried to the login screen so the person is told why they were signed out.
+        lastError = ConversionError.unauthorized.userFacingDescription
     }
 
     func validAccessToken() async throws -> String {
@@ -126,7 +161,7 @@ final class AuthManager: NSObject, ASWebAuthenticationPresentationContextProvidi
                 }
             }
             session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = true
+            session.prefersEphemeralWebBrowserSession = usesEphemeralWebSession
             self.session = session
             session.start()
         }

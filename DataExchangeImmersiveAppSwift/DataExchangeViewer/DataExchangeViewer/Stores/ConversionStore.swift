@@ -8,9 +8,34 @@ import Foundation
 enum ConversionState {
     case checking
     case notConverted
-    case running
+    case running(ConversionActivity)
     case completed
     case failed(String)
+}
+
+/// What the app is waiting on while a conversion is in flight, so the UI can show something
+/// better than an indeterminate "Converting…". The service reports no percentage for the
+/// conversion itself, so that phase is reported honestly as elapsed time; the artifact download
+/// does have a real byte count, and for a multi-hundred-megabyte BIM export that's the long part.
+struct ConversionActivity {
+    enum Phase {
+        case converting
+        case downloading(receivedBytes: Int64, totalBytes: Int64?)
+    }
+
+    /// When the app started waiting — not when the service started converting, which it doesn't
+    /// report. Enough for an elapsed-time readout that shows the wait is still moving.
+    let since: Date
+    var phase: Phase = .converting
+
+    /// Progress in 0...1, or nil when it can't be known: throughout the conversion phase, and
+    /// for a download the service declares no length for.
+    var fractionCompleted: Double? {
+        guard case .downloading(let received, let total) = phase, let total, total > 0 else {
+            return nil
+        }
+        return min(1, Double(received) / Double(total))
+    }
 }
 
 @Observable
@@ -38,6 +63,18 @@ final class ConversionStore {
     /// backs off so a long BIM conversion isn't polled 100 times.
     private static let initialPollInterval: Duration = .seconds(2)
     private static let maximumPollInterval: Duration = .seconds(15)
+    /// How long to keep watching a conversion that reports neither completion nor failure. The
+    /// limit used to be five minutes, which a large BIM export can legitimately exceed and which
+    /// failed the wait without explaining itself. The wait is now visible and cancellable, so the
+    /// deadline only exists to stop polling a service that has quietly stopped making progress.
+    private static let pollTimeout: TimeInterval = 30 * 60
+
+    /// The wait currently on screen, so moving from converting to downloading keeps one start
+    /// time rather than restarting the elapsed-time readout.
+    private var activity: ConversionActivity? {
+        if case .running(let activity) = state { return activity }
+        return nil
+    }
 
     init(exchange: Exchange) {
         self.exchange = exchange
@@ -70,21 +107,21 @@ final class ConversionStore {
                 case .completed:
                     await downloadArtifact(metadata: metadata, auth: auth)
                 case .running:
-                    state = .running
+                    state = .running(ConversionActivity(since: Date()))
                     startPolling(auth: auth)
                 case .failed:
-                    state = .failed(metadata.error ?? "Conversion failed")
+                    state = .failed(metadata.error ?? "The conversion failed on the service.")
                 }
             } else {
                 state = .notConverted
             }
         } catch {
-            state = .failed(error.localizedDescription)
+            report(error, auth: auth)
         }
     }
 
     func convert(auth: AuthManager) async {
-        state = .running
+        state = .running(ConversionActivity(since: Date()))
         logData = Data()
         logText = ""
         do {
@@ -93,11 +130,19 @@ final class ConversionStore {
         } catch ConversionError.conflict {
             // another client already started a conversion; fall through to polling its progress
         } catch {
-            state = .failed(error.localizedDescription)
+            report(error, auth: auth)
             return
         }
         startPolling(auth: auth)
         startLogPollingIfVisible(auth: auth)
+    }
+
+    /// Abandons the conversion in progress and discards whatever the service has produced for it.
+    /// Without this the only way out of a long conversion was to leave the screen, which left it
+    /// running on the service with nothing watching.
+    func cancel(auth: AuthManager) async {
+        stop()
+        await clear(auth: auth)
     }
 
     func clear(auth: AuthManager) async {
@@ -110,7 +155,7 @@ final class ConversionStore {
             logText = ""
             state = .notConverted
         } catch {
-            state = .failed(error.localizedDescription)
+            report(error, auth: auth)
         }
     }
 
@@ -130,7 +175,7 @@ final class ConversionStore {
     private func startPolling(auth: AuthManager) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
-            let deadline = Date().addingTimeInterval(5 * 60)
+            let deadline = Date().addingTimeInterval(Self.pollTimeout)
             var interval = Self.initialPollInterval
             while !Task.isCancelled {
                 // `if let` rather than `guard let`: a guard binding would live to the end of the
@@ -159,18 +204,24 @@ final class ConversionStore {
                     await downloadArtifact(metadata: metadata, auth: auth)
                     return false
                 case .failed:
-                    state = .failed(metadata.error ?? "Conversion failed")
+                    state = .failed(metadata.error ?? "The conversion failed on the service.")
                     return false
                 case .running:
                     break
                 }
             }
         } catch {
-            state = .failed(error.localizedDescription)
+            report(error, auth: auth)
             return false
         }
         if Date() >= deadline {
-            state = .failed("Conversion timed out")
+            let minutes = Int(Self.pollTimeout / 60)
+            state = .failed(
+                """
+                The conversion hasn't finished after \(minutes) minutes and may have stopped \
+                making progress. Retry to check on it again.
+                """
+            )
             return false
         }
         return true
@@ -178,21 +229,60 @@ final class ConversionStore {
 
     private func downloadArtifact(metadata: ConversionMetadata, auth: AuthManager) async {
         guard let fileName = ConversionAPI.findArtifact(metadata, extension: ".usdz") else {
-            state = .failed("No USDz artifact found")
+            state = .failed("The conversion finished without producing a USDZ file.")
             return
         }
+        var activity = self.activity ?? ConversionActivity(since: Date())
+        activity.phase = .downloading(receivedBytes: 0, totalBytes: nil)
+        state = .running(activity)
         do {
             let token = try await auth.validAccessToken()
+            // The progress closure captures the store explicitly rather than weakly: it belongs
+            // to the URLSession task and is released with it, so it can neither outlive the
+            // download nor form a cycle — the store never holds the delegate.
             let downloaded = try await api.downloadArtifact(
                 urn: exchange.conversionKeyUrn,
                 fileName: fileName,
                 token: token
-            )
+            ) { [store = self] received, total in
+                // Delivered on URLSession's delegate queue, so this hops back to the actor that
+                // owns `state`.
+                Task { @MainActor in
+                    store.reportDownload(received: received, total: total)
+                }
+            }
             cachedUSDzURL = try await cache.adopt(downloaded, for: exchange.conversionKeyUrn)
             state = .completed
         } catch {
-            state = .failed(error.localizedDescription)
+            report(error, auth: auth)
         }
+    }
+
+    /// Puts a failure on screen — and signs out first if it was a rejected token, which no
+    /// screen can recover from on its own.
+    ///
+    /// Cancellation is deliberately not a failure: leaving the detail view cancels an in-flight
+    /// status poll or download, and reporting that as "the conversion failed" would be wrong.
+    /// Whoever cancelled decides what the state becomes.
+    private func report(_ error: Error, auth: AuthManager) {
+        if error is CancellationError { return }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return }
+        auth.signOutIfSessionExpired(error)
+        state = .failed(error.userFacingDescription)
+    }
+
+    /// Updates the byte counts of a download already in progress. Progress callbacks arrive per
+    /// chunk — many times a second on a fast connection, each one re-rendering the preview — so
+    /// they're coalesced to roughly whole-percent steps, which is all a progress bar can show.
+    /// Matching on the existing phase also means a callback that lands after the download
+    /// finished or was cancelled can't resurrect the running state.
+    private func reportDownload(received: Int64, total: Int64?) {
+        guard var activity = self.activity,
+              case .downloading(let reported, _) = activity.phase else { return }
+        let step = max((total ?? 0) / 100, 1 << 20)
+        guard received - reported >= step || received == total else { return }
+        activity.phase = .downloading(receivedBytes: received, totalBytes: total)
+        state = .running(activity)
     }
 
     private func startLogPollingIfVisible(auth: AuthManager) {

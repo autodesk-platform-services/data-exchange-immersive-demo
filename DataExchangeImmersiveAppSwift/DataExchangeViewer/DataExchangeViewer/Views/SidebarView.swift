@@ -43,6 +43,7 @@ struct SidebarView: View {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     downloadedModelsSection
+                    signInSection
                     Button("Logout") { auth.logout() }
                 } label: {
                     Label("Account and Storage", systemImage: "person.crop.circle")
@@ -56,7 +57,8 @@ struct SidebarView: View {
                 let token = try await auth.validAccessToken()
                 hubs = .loaded(try await DataExchangeAPI().hubs(token: token))
             } catch {
-                hubs = .failed(error.localizedDescription)
+                auth.signOutIfSessionExpired(error)
+                hubs = .failed(error.userFacingDescription)
             }
         }
     }
@@ -71,6 +73,19 @@ struct SidebarView: View {
                 Label("Clear Downloaded Models", systemImage: "trash")
             }
             .disabled(cache.totalSize == 0)
+        }
+    }
+
+    /// Typing an Autodesk password on a head-mounted device is slow enough that reusing the
+    /// browser's existing sign-in is worth offering, so the choice is the person's rather than
+    /// hardcoded. Off by default; on, every sign-in starts from a blank browser session.
+    @ViewBuilder
+    private var signInSection: some View {
+        Section("Sign-In") {
+            Toggle("Private Sign-In", isOn: Binding(
+                get: { auth.usesEphemeralWebSession },
+                set: { auth.usesEphemeralWebSession = $0 }
+            ))
         }
     }
 
@@ -112,7 +127,8 @@ struct SidebarView: View {
             projectsByHub[hubID] = try await DataExchangeAPI().projects(token: token, hubId: hubID)
         } catch {
             // Includes the token lookup, which used to fail silently and leave the row blank.
-            hubProjectErrors[hubID] = error.localizedDescription
+            auth.signOutIfSessionExpired(error)
+            hubProjectErrors[hubID] = error.userFacingDescription
         }
     }
 }

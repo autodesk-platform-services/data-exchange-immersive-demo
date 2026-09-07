@@ -21,6 +21,11 @@ struct ExchangeListView: View {
         return searchText.isEmpty ? loaded : loaded.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
+    /// The `NavigationStack` is required, not redundant with the enclosing `NavigationSplitView`.
+    /// This view is that split view's detail column, and a `navigationDestination` declared on a
+    /// column targets the *next* column — of which there is none after detail, so the link has
+    /// nowhere to push and silently does nothing. A stack inside the column is what gives it
+    /// somewhere to push, and it keeps the destination next to the `NavigationLink` that uses it.
     var body: some View {
         NavigationStack {
             List(filteredExchanges) { exchange in
@@ -75,7 +80,8 @@ struct ExchangeListView: View {
             let token = try await auth.validAccessToken()
             exchanges = .loaded(try await DataExchangeAPI().exchanges(token: token, projectId: project.id))
         } catch {
-            exchanges = .failed(error.localizedDescription)
+            auth.signOutIfSessionExpired(error)
+            exchanges = .failed(error.userFacingDescription)
         }
     }
 }

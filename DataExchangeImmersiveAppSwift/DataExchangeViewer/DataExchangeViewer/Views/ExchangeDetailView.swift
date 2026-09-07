@@ -73,9 +73,12 @@ struct ExchangeDetailView: View {
             ProgressView()
         case .notConverted:
             Button("Convert") { Task { await conversion.convert(auth: auth) } }
+        // What the app is waiting on, how long it has been waiting, and the download's byte
+        // progress are all shown in the preview area, so the toolbar only needs the way out.
         case .running:
-            Label("Converting…", systemImage: "hourglass")
-                .labelStyle(.titleAndIcon)
+            Button(role: .cancel) { Task { await conversion.cancel(auth: auth) } } label: {
+                Label("Cancel", systemImage: "xmark")
+            }
         case .completed:
             Button(role: .destructive) { Task { await conversion.clear(auth: auth) } } label: {
                 Label("Clear", systemImage: "trash")

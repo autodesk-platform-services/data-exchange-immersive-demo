@@ -17,42 +17,72 @@ struct PreviewModePicker: View {
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
     var body: some View {
-        HStack(spacing: 4) {
-            segment("Peek", systemImage: "cube.transparent", mode: .peek,
-                    hint: "Shows the model through a framed opening in this window")
-            segment("Place", systemImage: "move.3d", mode: .place,
-                    hint: "Places a model you can move, rotate, and resize in your surroundings")
-            segment("Enter", systemImage: "figure.walk", mode: .enter,
-                    hint: "Expands the model to architectural scale with controls for flying through it while stationary")
+        // A three-way exclusive choice is what `Picker` is for. The hand-built capsules this
+        // replaced used `.buttonStyle(.plain)`, which suppresses the system hover effect — and on
+        // Vision Pro hover *is* the targeting feedback for eye tracking, so there was no way to
+        // tell what was about to be selected. `Picker` also supplies the selection semantics and
+        // the `.isSelected` accessibility trait that were previously applied by hand, and its
+        // system material stays legible against arbitrary passthrough where the hardcoded
+        // black-and-white capsules did not.
+        Picker("Preview mode", selection: modeSelection) {
+            ForEach(Segment.all) { segment in
+                Text(segment.title)
+                    .accessibilityHint(segment.hint)
+                    .disabled(segment.needsModel && fileURL == nil)
+                    .tag(segment.mode)
+            }
         }
-        .padding(4)
-        .background(.black.opacity(0.35), in: Capsule())
+        .pickerStyle(.segmented)
+        .labelsHidden()
         .disabled(appModel.isTransitioning)
         .opacity(appModel.isTransitioning ? 0.5 : 1)
+        .padding(6)
+        .glassBackgroundEffect()
     }
 
-    private func segment(
-        _ title: String,
-        systemImage: String,
-        mode: AppModel.PreviewMode,
-        hint: String
-    ) -> some View {
-        let isSelected = appModel.activeMode == mode
-        let needsModel = mode != .peek
-        return Button {
-            select(mode)
-        } label: {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-                .foregroundStyle(isSelected ? .black : .white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(isSelected ? Color.white : Color.clear, in: Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(needsModel && fileURL == nil)
-        .accessibilityHint(hint)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    /// Reads the active mode and routes a new selection through `select`, which owns the
+    /// asynchronous immersive-space work. Writing through a binding keeps the selection the
+    /// picker's own state rather than something reconstructed from button taps.
+    private var modeSelection: Binding<AppModel.PreviewMode> {
+        Binding(
+            get: { appModel.activeMode },
+            set: { mode in
+                // A disabled segment shouldn't be reachable, but the guard means a mode that
+                // needs a converted file can never be entered without one.
+                guard mode == .peek || fileURL != nil else { return }
+                select(mode)
+            }
+        )
+    }
+
+    /// One segment of the picker. Kept as data so the labels, hints, and file requirement live in
+    /// one place instead of being repeated per call.
+    private struct Segment: Identifiable {
+        let mode: AppModel.PreviewMode
+        let title: String
+        let hint: String
+
+        var id: AppModel.PreviewMode { mode }
+        /// Place and Enter both need a converted USDZ; Peek is available while one is on its way.
+        var needsModel: Bool { mode != .peek }
+
+        static let all: [Segment] = [
+            Segment(
+                mode: .peek,
+                title: "Peek",
+                hint: "Shows the model through a framed opening in this window"
+            ),
+            Segment(
+                mode: .place,
+                title: "Place",
+                hint: "Places a model you can move, rotate, and resize in your surroundings"
+            ),
+            Segment(
+                mode: .enter,
+                title: "Enter",
+                hint: "Expands the model to architectural scale with controls for flying through it while stationary"
+            )
+        ]
     }
 
     private func select(_ mode: AppModel.PreviewMode) {
