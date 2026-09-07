@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>APSCallbackURLScheme</key>
+	<string>$(APS_CALLBACK_URL_SCHEME)</string>
+	<key>APSClientID</key>
+	<string>$(APS_CLIENT_ID)</string>
+	<key>APSScopes</key>
+	<string>$(APS_SCOPES)</string>
+	<key>ConversionServiceBaseURL</key>
+	<string>$(CONVERSION_SERVICE_BASE_URL)</string>
 	<key>CFBundleIcons</key>
 	<dict>
 		<key>CFBundlePrimaryIcon</key>
@@ -14,7 +22,7 @@
 			<string>PetrBroz.DataExchangeViewer</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>dxviewer</string>
+				<string>$(APS_CALLBACK_URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>

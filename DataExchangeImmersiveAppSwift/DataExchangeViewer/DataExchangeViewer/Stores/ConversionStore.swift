@@ -95,14 +95,14 @@ final class ConversionStore {
         await cache.loadIndexIfNeeded()
         // Deliberately the real filesystem check rather than the in-memory index: this is the
         // point where the file is about to be handed to RealityKit.
-        if cache.confirmCached(for: exchange.conversionKeyUrn) {
-            cachedUSDzURL = cache.url(for: exchange.conversionKeyUrn)
+        if cache.confirmCached(for: exchange.cacheKeyUrn) {
+            cachedUSDzURL = cache.url(for: exchange.cacheKeyUrn)
             state = .completed
             return
         }
         do {
             let token = try await auth.validAccessToken()
-            if let metadata = try await api.status(urn: exchange.conversionKeyUrn, token: token) {
+            if let metadata = try await api.status(urn: exchange.exchangeUrn, token: token) {
                 switch metadata.status {
                 case .completed:
                     await downloadArtifact(metadata: metadata, auth: auth)
@@ -126,7 +126,7 @@ final class ConversionStore {
         logText = ""
         do {
             let token = try await auth.validAccessToken()
-            try await api.start(urn: exchange.conversionKeyUrn, token: token)
+            try await api.start(urn: exchange.exchangeUrn, token: token)
         } catch ConversionError.conflict {
             // another client already started a conversion; fall through to polling its progress
         } catch {
@@ -148,8 +148,8 @@ final class ConversionStore {
     func clear(auth: AuthManager) async {
         do {
             let token = try await auth.validAccessToken()
-            try await api.delete(urn: exchange.conversionKeyUrn, token: token)
-            cache.delete(for: exchange.conversionKeyUrn)
+            try await api.delete(urn: exchange.exchangeUrn, token: token)
+            cache.delete(for: exchange.cacheKeyUrn)
             cachedUSDzURL = nil
             logData = Data()
             logText = ""
@@ -198,17 +198,23 @@ final class ConversionStore {
     private func pollStatusOnce(auth: AuthManager, deadline: Date) async -> Bool {
         do {
             let token = try await auth.validAccessToken()
-            if let metadata = try await api.status(urn: exchange.conversionKeyUrn, token: token) {
-                switch metadata.status {
-                case .completed:
-                    await downloadArtifact(metadata: metadata, auth: auth)
-                    return false
-                case .failed:
-                    state = .failed(metadata.error ?? "The conversion failed on the service.")
-                    return false
-                case .running:
-                    break
-                }
+            guard let metadata = try await api.status(urn: exchange.exchangeUrn, token: token) else {
+                // The service no longer has a conversion for this exchange: another client
+                // deleted it, or a new version of the exchange was published and superseded it.
+                // Either way there is nothing left to wait for, and polling to the deadline
+                // would just spend half an hour on a conversion that is gone.
+                state = .notConverted
+                return false
+            }
+            switch metadata.status {
+            case .completed:
+                await downloadArtifact(metadata: metadata, auth: auth)
+                return false
+            case .failed:
+                state = .failed(metadata.error ?? "The conversion failed on the service.")
+                return false
+            case .running:
+                break
             }
         } catch {
             report(error, auth: auth)
@@ -241,7 +247,7 @@ final class ConversionStore {
             // to the URLSession task and is released with it, so it can neither outlive the
             // download nor form a cycle — the store never holds the delegate.
             let downloaded = try await api.downloadArtifact(
-                urn: exchange.conversionKeyUrn,
+                urn: exchange.exchangeUrn,
                 fileName: fileName,
                 token: token
             ) { [store = self] received, total in
@@ -251,7 +257,7 @@ final class ConversionStore {
                     store.reportDownload(received: received, total: total)
                 }
             }
-            cachedUSDzURL = try await cache.adopt(downloaded, for: exchange.conversionKeyUrn)
+            cachedUSDzURL = try await cache.adopt(downloaded, for: exchange.cacheKeyUrn)
             state = .completed
         } catch {
             report(error, auth: auth)
@@ -325,7 +331,7 @@ final class ConversionStore {
         var grew = false
         if let token = try? await auth.validAccessToken() {
             let chunk = try? await api.artifactChunk(
-                urn: exchange.conversionKeyUrn,
+                urn: exchange.exchangeUrn,
                 fileName: "log.txt",
                 token: token,
                 from: logData.count

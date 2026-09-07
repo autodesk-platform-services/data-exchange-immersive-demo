@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
+using DataExchangeConversionService.Models;
 using DataExchangeConversionService.Services;
 
 namespace DataExchangeConversionService.Controllers;
@@ -15,13 +16,16 @@ public sealed class ExchangesController : ControllerBase
         _conversionService = conversionService;
     }
 
-    // Returns the conversion status and the artifacts available for an exchange.
+    // Returns the conversion status and the artifacts available for an exchange. A conversion
+    // produced from a version the exchange has since moved past is reported as 404, the same as
+    // no conversion at all — see ConversionService.GetStatus.
     [HttpGet("{exchangeUrn}")]
     public async Task<IActionResult> GetStatus(string exchangeUrn)
     {
-        if (await CheckAccessAsync(exchangeUrn) is { } denied) { return denied; }
+        var (denied, exchange) = await ResolveExchangeAsync(exchangeUrn);
+        if (denied is not null) { return denied; }
 
-        var status = _conversionService.GetStatus(exchangeUrn);
+        var status = _conversionService.GetStatus(exchange);
         return status is null ? NotFound() : Ok(status);
     }
 
@@ -29,10 +33,11 @@ public sealed class ExchangesController : ControllerBase
     [HttpPost("{exchangeUrn}")]
     public async Task<IActionResult> StartConversion(string exchangeUrn)
     {
-        if (await CheckAccessAsync(exchangeUrn) is { } denied) { return denied; }
+        var (denied, exchange) = await ResolveExchangeAsync(exchangeUrn);
+        if (denied is not null) { return denied; }
 
         TryGetBearerToken(out var bearerToken);
-        if (_conversionService.GetStatus(exchangeUrn) is not null)
+        if (_conversionService.GetStatus(exchange) is not null)
         {
             return Conflict(new ProblemDetails
             {
@@ -41,7 +46,7 @@ public sealed class ExchangesController : ControllerBase
                 Status = StatusCodes.Status409Conflict
             });
         }
-        _conversionService.StartObjConversion(exchangeUrn, bearerToken);
+        _conversionService.StartObjConversion(exchange, bearerToken);
 
         return Accepted($"/api/exchanges/{exchangeUrn}");
     }
@@ -50,7 +55,8 @@ public sealed class ExchangesController : ControllerBase
     [HttpDelete("{exchangeUrn}")]
     public async Task<IActionResult> DeleteConversion(string exchangeUrn)
     {
-        if (await CheckAccessAsync(exchangeUrn) is { } denied) { return denied; }
+        var (denied, _) = await ResolveExchangeAsync(exchangeUrn);
+        if (denied is not null) { return denied; }
 
         _conversionService.DeleteObjConversion(exchangeUrn);
         return Ok();
@@ -61,9 +67,10 @@ public sealed class ExchangesController : ControllerBase
     [Produces("model/obj", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
     public async Task<IActionResult> GetArtifact(string exchangeUrn, string artifact)
     {
-        if (await CheckAccessAsync(exchangeUrn) is { } denied) { return denied; }
+        var (denied, exchange) = await ResolveExchangeAsync(exchangeUrn);
+        if (denied is not null) { return denied; }
 
-        var file = _conversionService.GetArtifact(exchangeUrn, artifact);
+        var file = _conversionService.GetArtifact(exchange, artifact);
         if (file is null) { return NotFound(); }
 
         // Streams from disk, and range processing lets a client resume an interrupted USDZ
@@ -71,29 +78,35 @@ public sealed class ExchangesController : ControllerBase
         return PhysicalFile(file.Path, file.ContentType, file.FileName, enableRangeProcessing: true);
     }
 
-    // Returns an error result unless a bearer token with access to the exchange is present, otherwise null.
-    private async Task<IActionResult?> CheckAccessAsync(string exchangeUrn)
+    // Checks that the request carries a bearer token with access to the exchange, and resolves the
+    // exchange's current version along the way — the same Data Exchange call answers both, so this
+    // costs no extra round trip. Returns the error result to send when access is refused, in which
+    // case the accompanying identity carries no version and must not be used.
+    private async Task<(IActionResult? Denied, ExchangeIdentity Exchange)> ResolveExchangeAsync(string exchangeUrn)
     {
+        var unresolved = new ExchangeIdentity(exchangeUrn, null);
+
         if (!TryGetBearerToken(out var bearerToken))
         {
-            return Unauthorized(new ProblemDetails
+            return (Unauthorized(new ProblemDetails
             {
                 Title = "Missing bearer token",
                 Detail = "Provide an Authorization header in the form 'Bearer {token}'."
-            });
+            }), unresolved);
         }
 
-        if (!await _conversionService.HasAccessAsync(exchangeUrn, bearerToken))
+        var exchange = await _conversionService.ResolveExchangeAsync(exchangeUrn, bearerToken);
+        if (exchange is null)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            return (StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
             {
                 Title = "Access denied",
                 Detail = "The provided token does not have access to this data exchange.",
                 Status = StatusCodes.Status403Forbidden
-            });
+            }), unresolved);
         }
 
-        return null;
+        return (null, exchange);
     }
 
     private bool TryGetBearerToken(out string bearerToken)

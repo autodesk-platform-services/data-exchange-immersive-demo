@@ -45,7 +45,7 @@ struct PreviewModePicker: View {
     /// picker's own state rather than something reconstructed from button taps.
     private var modeSelection: Binding<AppModel.PreviewMode> {
         Binding(
-            get: { appModel.activeMode },
+            get: { appModel.selectedPreviewMode },
             set: { mode in
                 // A disabled segment shouldn't be reachable, but the guard means a mode that
                 // needs a converted file can never be entered without one.
@@ -86,7 +86,7 @@ struct PreviewModePicker: View {
     }
 
     private func select(_ mode: AppModel.PreviewMode) {
-        guard mode != appModel.activeMode else { return }
+        guard mode != appModel.selectedPreviewMode else { return }
         Task { @MainActor in
             appModel.beginModeSwitch()
             defer { appModel.endModeSwitch() }
@@ -105,22 +105,17 @@ struct PreviewModePicker: View {
                 guard let fileURL else { return }
                 appModel.setPreviewModel(url: fileURL, name: modelName)
 
-                // Changing between Place and Enter only changes the model transform and immersion
-                // style. The loaded RealityKit scene remains alive.
-                if appModel.immersiveSpaceState == .open {
-                    appModel.selectedPreviewMode = mode
-                    appModel.isFullImmersion = false
-                    appModel.immersionStyle = mode == .place
-                        ? MixedImmersionStyle()
-                        : ProgressiveImmersionStyle()
-                    return
-                }
-
                 appModel.selectedPreviewMode = mode
                 appModel.isFullImmersion = false
                 appModel.immersionStyle = mode == .place
                     ? MixedImmersionStyle()
                     : ProgressiveImmersionStyle()
+
+                // Changing between Place and Enter only changes the model transform and immersion
+                // style, both of which are already set above. The loaded RealityKit scene remains
+                // alive, so there is no space to open.
+                guard appModel.immersiveSpaceState != .open else { return }
+
                 appModel.immersiveSpaceState = .inTransition
 
                 switch await openImmersiveSpace(id: appModel.immersiveSpaceID) {

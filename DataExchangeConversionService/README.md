@@ -41,6 +41,8 @@ The endpoint will return JSON object with extraction metadata:
 {
   "status": "completed",  // "running" | "completed" | "failed"
   "error": null,          // Error message in case "status" is "failed"
+  "fileVersionUrn": "urn:adsk.wipprod:fs.file:vf.lbJRla4QRhO-Xnu-1bEg5Q?version=3",
+                          // The exchange version these artifacts were produced from
   "artifacts": [          // List of filenames of generated artifacts in case "status" is "completed"
     "foo.obj",
     "foo.mtl",
@@ -49,6 +51,8 @@ The endpoint will return JSON object with extraction metadata:
   ]
 }
 ```
+
+The endpoint returns `404 Not Found` when there is no conversion for the exchange — *including* when the only stored conversion was produced from a version the exchange has since moved past. An exchange's lineage URN doesn't change when a new version is published, but its contents do, so a stale conversion is reported as absent rather than as the current one. Requesting a new conversion (`POST`) discards the superseded artifacts and converts the current version; artifact fetches are gated the same way, so a stale USDZ is never served.
 
 ### Fetching an extraction artifact
 

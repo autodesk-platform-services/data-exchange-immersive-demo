@@ -1,8 +1,9 @@
-using DataExchangeConversionService.Models;
+﻿using DataExchangeConversionService.Models;
 using DataExchangeConversionService.Options;
 using Autodesk.DataExchange;
 using Microsoft.Extensions.Options;
 using System.Runtime;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -28,34 +29,58 @@ public sealed class ConversionService
         _logger = logger;
     }
 
-    public async Task<bool> HasAccessAsync(string exchangeUrn, string bearerToken)
+    // Resolves the exchange for a bearer token, or null when the token cannot read it. The
+    // exchange details call only succeeds for tokens that have access, and it also reports the
+    // exchange's current version — which is what decides whether a stored conversion is still a
+    // conversion of what the exchange contains now.
+    public async Task<ExchangeIdentity?> ResolveExchangeAsync(string exchangeUrn, string bearerToken)
     {
-        // The exchange details call only succeeds for tokens that can access the exchange.
         try
         {
             var details = await CreateClient(bearerToken).GetExchangeDetailsAsync(exchangeUrn);
-            return !string.IsNullOrWhiteSpace(details.ExchangeID);
+            return string.IsNullOrWhiteSpace(details.ExchangeID)
+                ? null
+                : new ExchangeIdentity(exchangeUrn, details.FileVersionUrn);
         }
         catch
         {
-            return false;
+            return null;
         }
     }
 
-    public ConversionMetadata? GetStatus(string exchangeUrn)
+    public ConversionMetadata? GetStatus(ExchangeIdentity exchange)
     {
-        var metadataPath = Path.Combine(GetExchangeOutputFolder(exchangeUrn), MetadataFileName);
-        return File.Exists(metadataPath)
-            ? JsonSerializer.Deserialize<ConversionMetadata>(File.ReadAllText(metadataPath), JsonOptions)
-            : null;
+        var metadata = ReadMetadata(GetExchangeOutputFolder(exchange.ExchangeUrn));
+        if (metadata is null)
+        {
+            return null;
+        }
+
+        // A conversion produced from an earlier version of the exchange is not a conversion of
+        // what the exchange contains now. Reporting it as present is how a client ends up
+        // previewing last week's geometry and being told it is current, so it is reported as
+        // absent instead and re-converted on request.
+        return IsCurrent(metadata, exchange) ? metadata : null;
     }
 
-    public void StartObjConversion(string exchangeUrn, string bearerToken)
+    public void StartObjConversion(ExchangeIdentity exchange, string bearerToken)
     {
-        var outputFolder = GetExchangeOutputFolder(exchangeUrn);
+        var outputFolder = GetExchangeOutputFolder(exchange.ExchangeUrn);
         if (Directory.Exists(outputFolder))
         {
-            throw new InvalidOperationException($"Conversion already in progress for exchange {exchangeUrn}. Delete the current conversion first if you want to start it again.");
+            if (GetStatus(exchange) is not null)
+            {
+                throw new InvalidOperationException($"Conversion already in progress for exchange {exchange.ExchangeUrn}. Delete the current conversion first if you want to start it again.");
+            }
+
+            // Anything still on disk was produced from a version that has since been superseded
+            // (the caller has already been told about a conversion of the current one). Replacing
+            // it keeps one folder per exchange rather than accumulating a copy of every version
+            // ever converted — these artifacts run to hundreds of megabytes each.
+            _logger.LogInformation(
+                "Discarding a conversion of a superseded version of exchange {ExchangeUrn}.",
+                exchange.ExchangeUrn);
+            DeleteFolderIfExists(outputFolder);
         }
 
         Directory.CreateDirectory(outputFolder);
@@ -65,21 +90,31 @@ public sealed class ConversionService
 
         var metadata = new ConversionMetadata
         {
-            Artifacts = [LogFileName]
+            Artifacts = [LogFileName],
+            FileVersionUrn = exchange.FileVersionUrn
         };
         WriteMetadata(outputFolder, metadata);
-        _ = Task.Run(() => RunObjConversionAsync(exchangeUrn, bearerToken, outputFolder, metadata));
+        _ = Task.Run(() => RunObjConversionAsync(exchange.ExchangeUrn, bearerToken, outputFolder, metadata));
     }
 
     public void DeleteObjConversion(string exchangeUrn)
     {
+        // Keyed on the lineage URN alone, so this removes whichever version's conversion is
+        // stored — including one this service now considers superseded.
         DeleteFolderIfExists(GetExchangeOutputFolder(exchangeUrn));
     }
 
-    public Artifact? GetArtifact(string exchangeUrn, string artifactName)
+    public Artifact? GetArtifact(ExchangeIdentity exchange, string artifactName)
     {
+        // Gated the same way as the status, so an artifact left over from a superseded version is
+        // never served — not even to a client that asks for it by name.
+        if (GetStatus(exchange) is null)
+        {
+            return null;
+        }
+
         // GetFileName strips any directory parts, so the lookup stays inside the output folder.
-        var artifactPath = Path.Combine(GetExchangeOutputFolder(exchangeUrn), Path.GetFileName(artifactName));
+        var artifactPath = Path.Combine(GetExchangeOutputFolder(exchange.ExchangeUrn), Path.GetFileName(artifactName));
         if (!File.Exists(artifactPath))
         {
             return null;
@@ -129,6 +164,13 @@ public sealed class ConversionService
 
             Step("fetching exchange details");
             var details = await client.GetExchangeDetailsAsync(exchangeUrn);
+            // The version the artifacts are actually produced from, which is what a later status
+            // check compares against. Read again here rather than trusted from the request, in
+            // case a new version was published between the two.
+            if (!string.IsNullOrWhiteSpace(details.FileVersionUrn))
+            {
+                metadata.FileVersionUrn = details.FileVersionUrn;
+            }
 
             Step("downloading exchange as OBJ");
             var response = client.DownloadCompleteExchangeAsOBJ(
@@ -240,6 +282,29 @@ public sealed class ConversionService
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(metadata, JsonOptions));
     }
 
+    private static ConversionMetadata? ReadMetadata(string outputFolder)
+    {
+        var metadataPath = Path.Combine(outputFolder, MetadataFileName);
+        return File.Exists(metadataPath)
+            ? JsonSerializer.Deserialize<ConversionMetadata>(File.ReadAllText(metadataPath), JsonOptions)
+            : null;
+    }
+
+    // Whether a stored conversion belongs to the exchange's current version. Both URNs missing
+    // is treated as current: either the exchange reports no version, or the conversion predates
+    // this field being recorded, and in both cases the pre-version behaviour is the honest
+    // fallback rather than discarding a conversion on a guess.
+    private static bool IsCurrent(ConversionMetadata metadata, ExchangeIdentity exchange)
+    {
+        if (string.IsNullOrWhiteSpace(exchange.FileVersionUrn)
+            || string.IsNullOrWhiteSpace(metadata.FileVersionUrn))
+        {
+            return true;
+        }
+
+        return string.Equals(metadata.FileVersionUrn, exchange.FileVersionUrn, StringComparison.Ordinal);
+    }
+
     private string GetExchangeOutputFolder(string exchangeUrn)
     {
         var outputFolder = Path.IsPathRooted(_options.OutputFolder)
@@ -249,9 +314,15 @@ public sealed class ConversionService
         return Path.Combine(outputFolder, CreateCacheKey(exchangeUrn));
     }
 
+    // The exchange's folder name. A hex SHA-256 of the URN, matching the visionOS client's
+    // USDzCache.fileName(for:) — every character is legal in a path segment on every platform,
+    // which plain base64 is not: its alphabet includes '/', and Path.Combine would silently
+    // read that as a directory separator and scatter one exchange's artifacts into a nested
+    // folder. The digest is also a constant 64 characters, so a long URN cannot push the
+    // artifact paths towards the Windows path length limit.
     private static string CreateCacheKey(string exchangeUrn)
     {
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes(exchangeUrn));
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(exchangeUrn)));
     }
 
     // Deletes the folder and everything inside it.

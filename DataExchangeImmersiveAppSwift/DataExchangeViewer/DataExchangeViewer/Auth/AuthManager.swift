@@ -136,7 +136,7 @@ final class AuthManager: NSObject, ASWebAuthenticationPresentationContextProvidi
     // MARK: - OAuth PKCE (APS authorization code flow)
 
     private func authenticate() async throws -> TokenResponse {
-        let verifier = PKCE.codeVerifier()
+        let verifier = try PKCE.codeVerifier()
         let challenge = PKCE.codeChallenge(for: verifier)
 
         var components = URLComponents(url: APSConstants.authBase.appendingPathComponent("authorize"), resolvingAgainstBaseURL: false)!

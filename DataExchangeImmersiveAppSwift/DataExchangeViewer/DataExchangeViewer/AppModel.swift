@@ -65,10 +65,8 @@ final class AppModel {
     /// dismissal and restores it when the person returns to Place.
     var placedModelTransform: Transform?
 
-    var activeMode: PreviewMode { selectedPreviewMode }
-
     /// The in-window portal is hidden while Place or Enter owns the spatial presentation.
-    var isPeekVisible: Bool { activeMode == .peek && immersiveSpaceState == .closed }
+    var isPeekVisible: Bool { selectedPreviewMode == .peek && immersiveSpaceState == .closed }
 
     /// Whether a mode switch (of any kind) is currently in flight, for UI that should disable
     /// input or show a transitional state while it's ambiguous which mode is active.

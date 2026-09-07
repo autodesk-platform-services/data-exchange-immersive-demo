@@ -18,6 +18,10 @@ struct USDzPreviewView: View {
     @Environment(AppModel.self) private var appModel
     @State private var portalScene = PortalScene()
     @State private var loadError: String?
+    /// A degradation rather than a failure: the model is on screen, but without the studio
+    /// environment it renders effectively unlit. Reported instead of leaving someone to conclude
+    /// the geometry or its materials are broken.
+    @State private var lightingWarning: String?
 
     /// Fraction of each dimension kept as a gap on *each side* between the portal opening and
     /// the edges of the space it occupies, so it reads as a framed opening rather than content
@@ -39,6 +43,9 @@ struct USDzPreviewView: View {
                         GeometryReader3D { geometry in
                             RealityView { content in
                                 content.add(await portalScene.makeRoot())
+                                lightingWarning = portalScene.lightingFailure.map {
+                                    "Studio lighting is unavailable, so this model is rendering unlit. \($0.userFacingDescription)"
+                                }
                             } update: { content in
                                 // The model is attached from the load task rather than here, so
                                 // this closure only has to keep the portal opening sized — and
@@ -59,6 +66,12 @@ struct USDzPreviewView: View {
                                 .foregroundStyle(.red)
                                 .padding()
                                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                        } else if let lightingWarning {
+                            Text(lightingWarning)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding()
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                         }
                     } else if appModel.isTransitioning {
                         // Dismissing/opening a window or immersive space are separate windowing
@@ -70,8 +83,8 @@ struct USDzPreviewView: View {
                         // Explicitly sized so its centered content doesn't get pulled down to the
                         // ZStack's `.bottom` alignment, where it would overlap the controls below.
                         ContentUnavailableView(
-                            appModel.activeMode == .enter ? "Inside the model" : "Placed in your space",
-                            systemImage: appModel.activeMode == .enter ? "figure.walk" : "move.3d"
+                            appModel.selectedPreviewMode == .enter ? "Inside the model" : "Placed in your space",
+                            systemImage: appModel.selectedPreviewMode == .enter ? "figure.walk" : "move.3d"
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }

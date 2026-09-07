@@ -22,9 +22,9 @@ visionOS 27 and Xcode 27 are currently beta. Validate API names, availability, p
 - [x] Stream artifacts directly to disk instead of materializing the entire USDZ as `Data`.
 - [x] Expose download progress, conversion elapsed time, cancellation, retry, and actionable errors.
 - [ ] Report true conversion progress, which needs the service to publish a completion percentage.
-- [ ] Key cached artifacts by exchange version as well as exchange identity.
-- [ ] Replace discarded RealityKit loading errors and the HDRI `fatalError` with observable failure states.
-- [ ] Complete API pagination and define a safe strategy for deeply nested folders.
+- [x] Key cached artifacts by exchange version as well as exchange identity.
+- [x] Replace discarded RealityKit loading errors and the HDRI `fatalError` with observable failure states.
+- [x] Complete API pagination and define a safe strategy for deeply nested folders. Folder nesting is now walked breadth-first with no depth bound; a folder's `exchanges` field takes no pagination argument in the published schema, so that one gap is reported in the UI instead.
 - [ ] Create small, medium, and pathological BIM benchmark assets.
 - [ ] Record load time, peak memory, frame time, and thermal behavior on device.
 

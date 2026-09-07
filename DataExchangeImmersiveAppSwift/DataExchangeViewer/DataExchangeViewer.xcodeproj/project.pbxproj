@@ -139,9 +139,13 @@
 		67BA2F922FF69807004E8D50 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_CALLBACK_URL_SCHEME = dxviewer;
+				APS_CLIENT_ID = YmHvRac8ZID6GHVY3R9skAcVZ8joHmyYT1RH7mvic7kEpTM9;
+				APS_SCOPES = "data:read viewables:read";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
+				CONVERSION_SERVICE_BASE_URL = "https://data-exchange-conversion-service.azurewebsites.net";
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = DFFY54VP64;
 				ENABLE_PREVIEWS = YES;
@@ -170,9 +174,13 @@
 		67BA2F932FF69807004E8D50 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_CALLBACK_URL_SCHEME = dxviewer;
+				APS_CLIENT_ID = YmHvRac8ZID6GHVY3R9skAcVZ8joHmyYT1RH7mvic7kEpTM9;
+				APS_SCOPES = "data:read viewables:read";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
+				CONVERSION_SERVICE_BASE_URL = "https://data-exchange-conversion-service.azurewebsites.net";
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = DFFY54VP64;
 				ENABLE_PREVIEWS = YES;

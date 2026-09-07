@@ -8,7 +8,7 @@ import SwiftUI
 struct ExchangeListView: View {
     let project: Project
     @Environment(AuthManager.self) private var auth
-    @State private var exchanges: LoadState<[Exchange]> = .loading
+    @State private var listing: LoadState<ExchangeListing> = .loading
     @State private var searchText = ""
     /// The cache's own in-memory index. Rows used to answer "is this cached?" with a
     /// `USDzCache()` initialization (which creates the cache directory) plus a `fileExists`
@@ -17,7 +17,7 @@ struct ExchangeListView: View {
     private let cache = USDzCache.shared
 
     private var filteredExchanges: [Exchange] {
-        let loaded = exchanges.value ?? []
+        let loaded = listing.value?.exchanges ?? []
         return searchText.isEmpty ? loaded : loaded.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
@@ -28,12 +28,17 @@ struct ExchangeListView: View {
     /// somewhere to push, and it keeps the destination next to the `NavigationLink` that uses it.
     var body: some View {
         NavigationStack {
-            List(filteredExchanges) { exchange in
-                NavigationLink(value: exchange) {
-                    ExchangeRow(
-                        exchange: exchange,
-                        isCached: cache.isCached(for: exchange.conversionKeyUrn)
-                    )
+            List {
+                if let loaded = listing.value, !loaded.isComplete {
+                    Section { incompleteListingNotice(loaded) }
+                }
+                ForEach(filteredExchanges) { exchange in
+                    NavigationLink(value: exchange) {
+                        ExchangeRow(
+                            exchange: exchange,
+                            isCached: cache.isCached(for: exchange.cacheKeyUrn)
+                        )
+                    }
                 }
             }
             .navigationDestination(for: Exchange.self) { exchange in
@@ -47,12 +52,35 @@ struct ExchangeListView: View {
         .task { await cache.loadIndexIfNeeded() }
     }
 
+    /// Says so when the walk of the project's folders couldn't reach everything, rather than
+    /// letting a partial list read as the whole project. The rows that *were* found are still
+    /// listed above it — a partial answer is useful as long as it isn't presented as complete.
+    @ViewBuilder
+    private func incompleteListingNotice(_ listing: ExchangeListing) -> some View {
+        let folders = listing.partialFolders
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("This list may be incomplete.")
+                if !folders.isEmpty {
+                    Text("Autodesk Data Exchange returned only the first page of exchanges for \(folders.formatted(.list(type: .and))).")
+                }
+                if listing.reachedFolderLimit {
+                    Text("The project has more folders than this app searches, so deeper folders were skipped.")
+                }
+            }
+        } icon: {
+            Image(systemName: "exclamationmark.triangle")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
     /// As in the sidebar, "No exchanges in this project" is only reachable from `.loaded`. The
     /// state starting at `.loading` also removes the flash of that message on first render and
     /// on every project switch, which the previous `isLoading = false` default allowed.
     @ViewBuilder
     private var exchangeListStatus: some View {
-        switch exchanges {
+        switch listing {
         case .loading:
             ProgressView("Loading exchanges")
 
@@ -66,8 +94,20 @@ struct ExchangeListView: View {
             }
 
         case .loaded(let loaded):
-            if loaded.isEmpty {
-                ContentUnavailableView("No exchanges in this project", systemImage: "shippingbox")
+            if loaded.exchanges.isEmpty {
+                if loaded.isComplete {
+                    ContentUnavailableView("No exchanges in this project", systemImage: "shippingbox")
+                } else {
+                    // "None" and "none that this app could reach" are different answers, and the
+                    // second one has a retry worth offering.
+                    ContentUnavailableView {
+                        Label("No exchanges found", systemImage: "shippingbox")
+                    } description: {
+                        Text("Parts of this project couldn't be searched, so it may contain exchanges this list doesn't show.")
+                    } actions: {
+                        Button("Retry") { Task { await loadExchanges() } }
+                    }
+                }
             } else if filteredExchanges.isEmpty {
                 ContentUnavailableView.search(text: searchText)
             }
@@ -75,13 +115,13 @@ struct ExchangeListView: View {
     }
 
     private func loadExchanges() async {
-        exchanges = .loading
+        listing = .loading
         do {
             let token = try await auth.validAccessToken()
-            exchanges = .loaded(try await DataExchangeAPI().exchanges(token: token, projectId: project.id))
+            listing = .loaded(try await DataExchangeAPI().exchanges(token: token, projectId: project.id))
         } catch {
             auth.signOutIfSessionExpired(error)
-            exchanges = .failed(error.userFacingDescription)
+            listing = .failed(error.userFacingDescription)
         }
     }
 }

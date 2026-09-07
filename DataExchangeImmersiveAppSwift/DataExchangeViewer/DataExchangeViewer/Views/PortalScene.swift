@@ -26,6 +26,12 @@ final class PortalScene {
     private var model: Entity?
     private var buildTask: Task<Entity, Never>?
 
+    /// Why the portal has no image-based lighting, when it doesn't. Retained rather than
+    /// discarded: without the studio environment a PBR model renders effectively unlit, which
+    /// looks like a broken model rather than missing lighting. Kept after `build` finishes
+    /// because the scene is built once and re-shown, so every `makeRoot` can report it.
+    private(set) var lightingFailure: Error?
+
     /// The root to add to the scene, built on first call and reused afterwards. Peek is torn down
     /// and re-shown whenever the immersive space opens and closes, and rebuilding the portal and
     /// its environment probe each time is wasted work.
@@ -51,8 +57,10 @@ final class PortalScene {
         world.addChild(modelContainer)
         root.addChild(world)
 
-        if let environment = try? await StudioLighting.makeEnvironment() {
-            StudioLighting.apply(environment, to: world)
+        do {
+            StudioLighting.apply(try await StudioLighting.makeEnvironment(), to: world)
+        } catch {
+            lightingFailure = error
         }
 
         portalPlane.components.set(PortalComponent(target: world))

@@ -20,6 +20,10 @@ struct ImmersiveModelView: View {
     @State private var backgroundContainer = Entity()
     @State private var loadedEntity: Entity?
     @State private var loadError: String?
+    /// Degradations rather than failures: the model is on screen and usable, but something it
+    /// depends on didn't come up. Reported so an unlit model or an unsteerable flight reads as a
+    /// known limitation and not as broken geometry or broken controls.
+    @State private var notices: [Notice: String] = [:]
     @State private var arkitSession = ARKitSession()
     @State private var worldTracking = WorldTrackingProvider()
     @State private var flight = FlightController()
@@ -43,8 +47,15 @@ struct ImmersiveModelView: View {
             root.addChild(modelContainer)
             content.add(root)
 
-            if let environment = try? await StudioLighting.makeEnvironment() {
-                StudioLighting.apply(environment, to: root, withBackground: false)
+            do {
+                StudioLighting.apply(
+                    try await StudioLighting.makeEnvironment(),
+                    to: root,
+                    withBackground: false
+                )
+            } catch {
+                notices[.lighting] =
+                    "Studio lighting is unavailable, so this model is rendering unlit. \(error.userFacingDescription)"
             }
             backgroundContainer.addChild(StudioLighting.makeBackgroundEntity())
 
@@ -54,7 +65,7 @@ struct ImmersiveModelView: View {
             let tracking = worldTracking
             flight.attach(to: content) { Self.viewerForward(from: tracking) }
         } update: { _ in
-            backgroundContainer.isEnabled = appModel.activeMode == .enter
+            backgroundContainer.isEnabled = appModel.selectedPreviewMode == .enter
 
             if let loadedEntity {
                 if loadedEntity.parent !== modelContainer {
@@ -72,11 +83,21 @@ struct ImmersiveModelView: View {
                         .foregroundStyle(.red)
                         .padding()
                         .glassBackgroundEffect()
-                } else if showManipulationHint && appModel.activeMode == .place {
+                } else if showManipulationHint && appModel.selectedPreviewMode == .place {
                     Label("Pinch and drag to move; use two hands to rotate or resize", systemImage: "hand.pinch")
                         .padding()
                         .glassBackgroundEffect()
                         .transition(.opacity)
+                }
+
+                ForEach(Notice.allCases, id: \.self) { notice in
+                    if let message = notices[notice] {
+                        Label(message, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(8)
+                            .glassBackgroundEffect()
+                    }
                 }
 
                 PreviewModePicker(
@@ -84,7 +105,7 @@ struct ImmersiveModelView: View {
                     modelName: appModel.previewModelName ?? "Model"
                 )
 
-                if appModel.activeMode == .enter {
+                if appModel.selectedPreviewMode == .enter {
                     flightControls
 
                     Button {
@@ -112,8 +133,8 @@ struct ImmersiveModelView: View {
         .task(id: appModel.previewModelURL) {
             await loadModel()
         }
-        .task(id: appModel.activeMode) {
-            guard appModel.activeMode == .place, !hasSeenManipulationHint else { return }
+        .task(id: appModel.selectedPreviewMode) {
+            guard appModel.selectedPreviewMode == .place, !hasSeenManipulationHint else { return }
             withAnimation { showManipulationHint = true }
             try? await Task.sleep(for: .seconds(4))
             withAnimation { showManipulationHint = false }
@@ -123,7 +144,7 @@ struct ImmersiveModelView: View {
             guard !Task.isCancelled else { return }
             hasSeenManipulationHint = true
         }
-        .onChange(of: appModel.activeMode) { oldMode, newMode in
+        .onChange(of: appModel.selectedPreviewMode) { oldMode, newMode in
             guard let loadedEntity else { return }
             Task { @MainActor in
                 appModel.beginModeSwitch()
@@ -135,7 +156,7 @@ struct ImmersiveModelView: View {
             appModel.immersiveSpaceState = .open
         }
         .onDisappear {
-            if appModel.activeMode == .place, let loadedEntity {
+            if appModel.selectedPreviewMode == .place, let loadedEntity {
                 appModel.placedModelTransform = loadedEntity.transform
             }
             flight.setTarget(nil)
@@ -229,7 +250,7 @@ struct ImmersiveModelView: View {
 
     private func resetEntrance() {
         Task { @MainActor in
-            guard appModel.activeMode == .enter, let loadedEntity else { return }
+            guard appModel.selectedPreviewMode == .enter, let loadedEntity else { return }
             // The animated move below and the per-frame flight update write the same transform.
             flight.halt()
             let deviceTransform = await currentDeviceTransform()
@@ -253,8 +274,29 @@ struct ImmersiveModelView: View {
 
     @MainActor
     private func startWorldTracking() async {
+        // A platform without world tracking is a capability, not a failure, and there is nothing
+        // the person could do about it — so it stays silent, as before.
         guard WorldTrackingProvider.isSupported, worldTracking.state != .running else { return }
-        try? await arkitSession.run([worldTracking])
+        do {
+            try await arkitSession.run([worldTracking])
+            notices[.tracking] = nil
+        } catch {
+            // Not fatal: `viewerFrame` falls back to visionOS's conventional initial immersive
+            // frame, so the model still appears and flight still moves it. What's lost is the
+            // heading, which is what lets someone steer mid-flight by turning their head — so a
+            // silent fallback would read as broken controls.
+            notices[.tracking] = """
+            Head tracking didn't start, so the model is positioned from a default viewpoint and \
+            flight can't be steered by turning your head. \(error.userFacingDescription)
+            """
+        }
+    }
+
+    /// One slot per degradation, so re-running the load replaces a message rather than appending
+    /// another copy of it.
+    private enum Notice: CaseIterable {
+        case lighting
+        case tracking
     }
 
     /// Device-anchor queries don't require world-sensing authorization. Waiting briefly gives the
@@ -294,7 +336,7 @@ struct ImmersiveModelView: View {
                 entity.accessibilityLabelKey = LocalizedStringResource("\(modelName)")
             }
             let deviceTransform = await currentDeviceTransform()
-            apply(appModel.activeMode, to: entity, relativeTo: deviceTransform, animated: false)
+            apply(appModel.selectedPreviewMode, to: entity, relativeTo: deviceTransform, animated: false)
             loadedEntity = entity
         } catch {
             loadError = "Failed to load preview: \(error.localizedDescription)"
