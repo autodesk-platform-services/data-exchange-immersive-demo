@@ -54,6 +54,11 @@ struct ExchangeDetailView: View {
             .task(id: exchange.id) {
                 await conversion.start(auth: auth)
             }
+            // The store's polling loops are unstructured tasks, so leaving this view has to
+            // cancel them explicitly or they keep hitting the service with nothing observing.
+            .onDisappear {
+                conversion.stop()
+            }
     }
 
     @ViewBuilder

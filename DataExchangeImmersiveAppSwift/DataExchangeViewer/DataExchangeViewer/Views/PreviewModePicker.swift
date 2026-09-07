@@ -58,8 +58,8 @@ struct PreviewModePicker: View {
     private func select(_ mode: AppModel.PreviewMode) {
         guard mode != appModel.activeMode else { return }
         Task { @MainActor in
-            appModel.isSwitchingMode = true
-            defer { appModel.isSwitchingMode = false }
+            appModel.beginModeSwitch()
+            defer { appModel.endModeSwitch() }
 
             switch mode {
             case .peek:

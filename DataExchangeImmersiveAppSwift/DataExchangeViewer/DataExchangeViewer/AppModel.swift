@@ -37,9 +37,22 @@ final class AppModel {
     var immersionStyle: any ImmersionStyle = MixedImmersionStyle()
     var isFullImmersion = false
 
+    /// Number of mode switches currently in flight. Two overlapping transitions (the picker's
+    /// own task and ImmersiveModelView's `onChange`) each used to set and clear a single Bool,
+    /// so whichever finished first re-enabled the picker while the other was still animating.
+    private var modeSwitchDepth = 0
+
     /// True for the whole asynchronous open/dismiss sequence, so controls don't accept another
     /// mode selection while the system is still changing scene presentation.
-    var isSwitchingMode = false
+    var isSwitchingMode: Bool { modeSwitchDepth > 0 }
+
+    func beginModeSwitch() {
+        modeSwitchDepth += 1
+    }
+
+    func endModeSwitch() {
+        modeSwitchDepth = max(0, modeSwitchDepth - 1)
+    }
 
     /// The USDZ file the immersive space should display, set right before opening it.
     var previewModelURL: URL?

@@ -29,7 +29,11 @@ final class ConversionStore {
         self.exchange = exchange
     }
 
-    deinit {
+    /// Cancels both polling loops. Called from the owning view's `onDisappear`, because a
+    /// `deinit` cannot do this job: the properties are main-actor isolated (a hard error under
+    /// Swift 6 strict concurrency), and the loops used to hold a strong reference to the store
+    /// anyway, so `deinit` was never reached while polling was in flight.
+    func stop() {
         pollTask?.cancel()
         logTask?.cancel()
     }
@@ -93,34 +97,48 @@ final class ConversionStore {
     private func startPolling(auth: AuthManager) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
-            guard let self else { return }
             let deadline = Date().addingTimeInterval(5 * 60)
             while !Task.isCancelled {
-                do {
-                    let token = try await auth.validAccessToken()
-                    if let metadata = try await self.api.status(urn: self.exchange.conversionKeyUrn, token: token) {
-                        switch metadata.status {
-                        case .completed:
-                            await self.downloadArtifact(metadata: metadata, auth: auth)
-                            return
-                        case .failed:
-                            self.state = .failed(metadata.error ?? "Conversion failed")
-                            return
-                        case .running:
-                            break
-                        }
-                    }
-                } catch {
-                    self.state = .failed(error.localizedDescription)
+                // `if let` rather than `guard let`: a guard binding would live to the end of the
+                // loop body and so pin the store across the sleep below, which is what kept an
+                // abandoned store — and its network traffic — alive for the full deadline.
+                let keepPolling: Bool
+                if let store = self {
+                    keepPolling = await store.pollStatusOnce(auth: auth, deadline: deadline)
+                } else {
                     return
                 }
-                if Date() >= deadline {
-                    self.state = .failed("Conversion timed out")
-                    return
-                }
+                guard keepPolling else { return }
                 try? await Task.sleep(for: .seconds(3))
             }
         }
+    }
+
+    /// One status check. Returns whether the conversion is still running and worth polling again.
+    private func pollStatusOnce(auth: AuthManager, deadline: Date) async -> Bool {
+        do {
+            let token = try await auth.validAccessToken()
+            if let metadata = try await api.status(urn: exchange.conversionKeyUrn, token: token) {
+                switch metadata.status {
+                case .completed:
+                    await downloadArtifact(metadata: metadata, auth: auth)
+                    return false
+                case .failed:
+                    state = .failed(metadata.error ?? "Conversion failed")
+                    return false
+                case .running:
+                    break
+                }
+            }
+        } catch {
+            state = .failed(error.localizedDescription)
+            return false
+        }
+        if Date() >= deadline {
+            state = .failed("Conversion timed out")
+            return false
+        }
+        return true
     }
 
     private func downloadArtifact(metadata: ConversionMetadata, auth: AuthManager) async {
@@ -141,14 +159,26 @@ final class ConversionStore {
     private func startLogPolling(auth: AuthManager) {
         logTask?.cancel()
         logTask = Task { [weak self] in
-            guard let self else { return }
             while !Task.isCancelled {
-                if let token = try? await auth.validAccessToken() {
-                    self.logText = (try? await self.api.artifactText(urn: self.exchange.conversionKeyUrn, fileName: "log.txt", token: token)) ?? self.logText
+                let keepPolling: Bool
+                if let store = self {
+                    keepPolling = await store.refreshLogOnce(auth: auth)
+                } else {
+                    return
                 }
-                guard case .running = self.state else { return }
+                guard keepPolling else { return }
                 try? await Task.sleep(for: .seconds(3))
             }
         }
+    }
+
+    /// Fetches the log once, keeping the previous text if the request fails. Returns whether the
+    /// conversion is still running, since the log only grows while it is.
+    private func refreshLogOnce(auth: AuthManager) async -> Bool {
+        if let token = try? await auth.validAccessToken() {
+            logText = (try? await api.artifactText(urn: exchange.conversionKeyUrn, fileName: "log.txt", token: token)) ?? logText
+        }
+        guard case .running = state else { return false }
+        return true
     }
 }

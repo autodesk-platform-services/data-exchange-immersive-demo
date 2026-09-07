@@ -123,8 +123,8 @@ struct ImmersiveModelView: View {
         .onChange(of: appModel.activeMode) { oldMode, newMode in
             guard let loadedEntity else { return }
             Task { @MainActor in
-                appModel.isSwitchingMode = true
-                defer { appModel.isSwitchingMode = false }
+                appModel.beginModeSwitch()
+                defer { appModel.endModeSwitch() }
                 await transition(loadedEntity, from: oldMode, to: newMode)
             }
         }

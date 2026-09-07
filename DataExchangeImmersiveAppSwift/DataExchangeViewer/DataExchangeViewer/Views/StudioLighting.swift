@@ -15,8 +15,16 @@ enum StudioLighting {
     // comfortably beyond that content so its surface never becomes a clipping boundary.
     static let backgroundSphereRadius: Float = 500
 
+    enum LightingError: Error {
+        /// The generated neutral environment bitmap could not be created.
+        case environmentImageUnavailable
+    }
+
     static func makeEnvironment() async throws -> EnvironmentResource {
-        try await EnvironmentResource(equirectangular: neutralEnvironmentImage)
+        guard let image = neutralEnvironmentImage else {
+            throw LightingError.environmentImageUnavailable
+        }
+        return try await EnvironmentResource(equirectangular: image)
     }
 
     /// Adds uniform image-based light so PBR materials remain legible without suggesting a
@@ -46,7 +54,9 @@ enum StudioLighting {
 
     /// A tiny, generated 2:1 map supplies shadow-free white IBL without bundling or displaying
     /// a photographic environment image.
-    private static let neutralEnvironmentImage: CGImage = {
+    /// Optional rather than force-created: callers already treat a missing environment as
+    /// "render without image-based lighting", which is a far better outcome than trapping.
+    private static let neutralEnvironmentImage: CGImage? = {
         let width = 32
         let height = 16
         guard let context = CGContext(
@@ -58,15 +68,12 @@ enum StudioLighting {
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else {
-            fatalError("Failed to create the neutral lighting environment.")
+            return nil
         }
 
         context.setFillColor(UIColor.white.cgColor)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
 
-        guard let image = context.makeImage() else {
-            fatalError("Failed to render the neutral lighting environment.")
-        }
-        return image
+        return context.makeImage()
     }()
 }
