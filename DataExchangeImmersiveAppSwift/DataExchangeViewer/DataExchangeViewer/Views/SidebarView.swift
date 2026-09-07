@@ -14,6 +14,9 @@ struct SidebarView: View {
     @State private var hubProjectErrors: [String: String] = [:]
     @State private var hubListRetryToken = UUID()
     @State private var searchText = ""
+    /// Downloaded USDZ packages are hundreds of megabytes each, so how much disk the app is
+    /// holding is worth showing — and worth being able to reclaim without deleting the app.
+    private let cache = USDzCache.shared
 
     private var filteredHubs: [Hub] {
         let loaded = hubs.value ?? []
@@ -38,9 +41,15 @@ struct SidebarView: View {
         .navigationTitle("Data Exchange Viewer")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Logout") { auth.logout() }
+                Menu {
+                    downloadedModelsSection
+                    Button("Logout") { auth.logout() }
+                } label: {
+                    Label("Account and Storage", systemImage: "person.crop.circle")
+                }
             }
         }
+        .task { await cache.loadIndexIfNeeded() }
         .task(id: hubListRetryToken) {
             hubs = .loading
             do {
@@ -49,6 +58,19 @@ struct SidebarView: View {
             } catch {
                 hubs = .failed(error.localizedDescription)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var downloadedModelsSection: some View {
+        Section("Downloaded Models") {
+            Text(cache.totalSize.formatted(.byteCount(style: .file)))
+            Button(role: .destructive) {
+                Task { await cache.clearAll() }
+            } label: {
+                Label("Clear Downloaded Models", systemImage: "trash")
+            }
+            .disabled(cache.totalSize == 0)
         }
     }
 

@@ -21,9 +21,23 @@ final class ConversionStore {
     private(set) var logText: String = ""
 
     private let api = ConversionAPI()
-    private let cache = USDzCache()
+    private let cache = USDzCache.shared
     private var pollTask: Task<Void, Never>?
     private var logTask: Task<Void, Never>?
+
+    /// Raw log bytes received so far. Kept as `Data` rather than appending to `logText` so a
+    /// multi-byte character split across a range boundary still decodes correctly, and so the
+    /// byte count is an exact offset for the next range request.
+    private var logData = Data()
+    /// Whether the conversion log is on screen. The log is only polled while it is: previously
+    /// polling started unconditionally from `start`, which meant a guaranteed 404 on every
+    /// detail-view open for an exchange that had never been converted.
+    private var isLogVisible = false
+
+    /// Status polling starts fast, because a small conversion can finish in a few seconds, then
+    /// backs off so a long BIM conversion isn't polled 100 times.
+    private static let initialPollInterval: Duration = .seconds(2)
+    private static let maximumPollInterval: Duration = .seconds(15)
 
     init(exchange: Exchange) {
         self.exchange = exchange
@@ -35,13 +49,16 @@ final class ConversionStore {
     /// anyway, so `deinit` was never reached while polling was in flight.
     func stop() {
         pollTask?.cancel()
+        pollTask = nil
         logTask?.cancel()
+        logTask = nil
     }
 
     func start(auth: AuthManager) async {
-        defer { startLogPolling(auth: auth) }
-
-        if cache.exists(for: exchange.conversionKeyUrn) {
+        await cache.loadIndexIfNeeded()
+        // Deliberately the real filesystem check rather than the in-memory index: this is the
+        // point where the file is about to be handed to RealityKit.
+        if cache.confirmCached(for: exchange.conversionKeyUrn) {
             cachedUSDzURL = cache.url(for: exchange.conversionKeyUrn)
             state = .completed
             return
@@ -68,6 +85,8 @@ final class ConversionStore {
 
     func convert(auth: AuthManager) async {
         state = .running
+        logData = Data()
+        logText = ""
         do {
             let token = try await auth.validAccessToken()
             try await api.start(urn: exchange.conversionKeyUrn, token: token)
@@ -78,7 +97,7 @@ final class ConversionStore {
             return
         }
         startPolling(auth: auth)
-        startLogPolling(auth: auth)
+        startLogPollingIfVisible(auth: auth)
     }
 
     func clear(auth: AuthManager) async {
@@ -87,6 +106,7 @@ final class ConversionStore {
             try await api.delete(urn: exchange.conversionKeyUrn, token: token)
             cache.delete(for: exchange.conversionKeyUrn)
             cachedUSDzURL = nil
+            logData = Data()
             logText = ""
             state = .notConverted
         } catch {
@@ -94,10 +114,24 @@ final class ConversionStore {
         }
     }
 
+    /// Called as the conversion log is presented and dismissed. Nothing observes `logText` while
+    /// the sheet is closed, and re-assigning it invalidates the sheet's `Text` — which lays out a
+    /// large monospaced, unwrapped body — so the fetch is scoped to the sheet's lifetime.
+    func setLogVisible(_ isVisible: Bool, auth: AuthManager) {
+        isLogVisible = isVisible
+        if isVisible {
+            startLogPollingIfVisible(auth: auth)
+        } else {
+            logTask?.cancel()
+            logTask = nil
+        }
+    }
+
     private func startPolling(auth: AuthManager) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             let deadline = Date().addingTimeInterval(5 * 60)
+            var interval = Self.initialPollInterval
             while !Task.isCancelled {
                 // `if let` rather than `guard let`: a guard binding would live to the end of the
                 // loop body and so pin the store across the sleep below, which is what kept an
@@ -109,7 +143,8 @@ final class ConversionStore {
                     return
                 }
                 guard keepPolling else { return }
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: interval)
+                interval = min(interval * 2, Self.maximumPollInterval)
             }
         }
     }
@@ -148,37 +183,80 @@ final class ConversionStore {
         }
         do {
             let token = try await auth.validAccessToken()
-            let data = try await api.artifactData(urn: exchange.conversionKeyUrn, fileName: fileName, token: token)
-            cachedUSDzURL = try cache.save(data, for: exchange.conversionKeyUrn)
+            let downloaded = try await api.downloadArtifact(
+                urn: exchange.conversionKeyUrn,
+                fileName: fileName,
+                token: token
+            )
+            cachedUSDzURL = try await cache.adopt(downloaded, for: exchange.conversionKeyUrn)
             state = .completed
         } catch {
             state = .failed(error.localizedDescription)
         }
     }
 
-    private func startLogPolling(auth: AuthManager) {
+    private func startLogPollingIfVisible(auth: AuthManager) {
         logTask?.cancel()
+        logTask = nil
+        guard isLogVisible else { return }
+        // Nothing to fetch, and a request would 404: no conversion has ever produced a log.
+        if case .notConverted = state { return }
+
         logTask = Task { [weak self] in
+            var interval = Self.initialPollInterval
             while !Task.isCancelled {
-                let keepPolling: Bool
+                let outcome: LogRefresh
                 if let store = self {
-                    keepPolling = await store.refreshLogOnce(auth: auth)
+                    outcome = await store.refreshLogOnce(auth: auth)
                 } else {
                     return
                 }
-                guard keepPolling else { return }
-                try? await Task.sleep(for: .seconds(3))
+                guard outcome != .finished else { return }
+                try? await Task.sleep(for: interval)
+                // Only back off while the log is quiet; new output means the conversion is
+                // producing something worth following closely.
+                interval = outcome == .grew
+                    ? Self.initialPollInterval
+                    : min(interval * 2, Self.maximumPollInterval)
             }
         }
     }
 
-    /// Fetches the log once, keeping the previous text if the request fails. Returns whether the
-    /// conversion is still running, since the log only grows while it is.
-    private func refreshLogOnce(auth: AuthManager) async -> Bool {
+    private enum LogRefresh {
+        case grew
+        case unchanged
+        /// The log will not grow again, so there is nothing left to poll for.
+        case finished
+    }
+
+    /// Tails the log once, keeping what has already been received if the request fails. The log
+    /// only grows while the conversion runs, so a finished conversion is read exactly once.
+    private func refreshLogOnce(auth: AuthManager) async -> LogRefresh {
+        var grew = false
         if let token = try? await auth.validAccessToken() {
-            logText = (try? await api.artifactText(urn: exchange.conversionKeyUrn, fileName: "log.txt", token: token)) ?? logText
+            let chunk = try? await api.artifactChunk(
+                urn: exchange.conversionKeyUrn,
+                fileName: "log.txt",
+                token: token,
+                from: logData.count
+            )
+            switch chunk {
+            case .appended(let data) where !data.isEmpty:
+                logData.append(data)
+                grew = true
+            case .whole(let data) where data != logData:
+                logData = data
+                grew = true
+            case .appended, .whole, .unchanged, .none:
+                break
+            }
+            // Assigned only when the bytes actually changed, so an idle poll doesn't invalidate
+            // the sheet and force a re-layout of the whole log.
+            if grew {
+                logText = String(decoding: logData, as: UTF8.self)
+            }
         }
-        guard case .running = state else { return false }
-        return true
+        guard case .running = state else { return .finished }
+        return grew ? .grew : .unchanged
     }
 }

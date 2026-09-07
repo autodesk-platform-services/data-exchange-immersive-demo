@@ -93,7 +93,7 @@ public sealed class ConversionService
             ".txt" => "text/plain",
             _ => "application/octet-stream",
         };
-        return new Artifact(File.ReadAllBytes(artifactPath), Path.GetFileName(artifactPath), contentType);
+        return new Artifact(artifactPath, Path.GetFileName(artifactPath), contentType);
     }
 
     private async Task RunObjConversionAsync(

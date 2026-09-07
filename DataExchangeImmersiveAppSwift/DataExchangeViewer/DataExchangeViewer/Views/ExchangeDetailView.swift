@@ -51,6 +51,11 @@ struct ExchangeDetailView: View {
                         }
                 }
             }
+            // The log is only fetched while it is on screen. It used to be polled in full every
+            // three seconds for the lifetime of this view, whether or not the sheet was open.
+            .onChange(of: isShowingConversionLog) { _, isShowing in
+                conversion.setLogVisible(isShowing, auth: auth)
+            }
             .task(id: exchange.id) {
                 await conversion.start(auth: auth)
             }

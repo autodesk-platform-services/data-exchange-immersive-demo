@@ -10,6 +10,11 @@ struct ExchangeListView: View {
     @Environment(AuthManager.self) private var auth
     @State private var exchanges: LoadState<[Exchange]> = .loading
     @State private var searchText = ""
+    /// The cache's own in-memory index. Rows used to answer "is this cached?" with a
+    /// `USDzCache()` initialization (which creates the cache directory) plus a `fileExists`
+    /// probe — two syscalls per visible row, per body evaluation, on the main thread. Because the
+    /// index is observable, rows still update the moment a conversion finishes downloading.
+    private let cache = USDzCache.shared
 
     private var filteredExchanges: [Exchange] {
         let loaded = exchanges.value ?? []
@@ -20,7 +25,10 @@ struct ExchangeListView: View {
         NavigationStack {
             List(filteredExchanges) { exchange in
                 NavigationLink(value: exchange) {
-                    ExchangeRow(exchange: exchange)
+                    ExchangeRow(
+                        exchange: exchange,
+                        isCached: cache.isCached(for: exchange.conversionKeyUrn)
+                    )
                 }
             }
             .navigationDestination(for: Exchange.self) { exchange in
@@ -31,6 +39,7 @@ struct ExchangeListView: View {
             .overlay { exchangeListStatus }
         }
         .task(id: project.id) { await loadExchanges() }
+        .task { await cache.loadIndexIfNeeded() }
     }
 
     /// As in the sidebar, "No exchanges in this project" is only reachable from `.loaded`. The
@@ -73,7 +82,7 @@ struct ExchangeListView: View {
 
 private struct ExchangeRow: View {
     let exchange: Exchange
-    private var isCached: Bool { USDzCache().exists(for: exchange.conversionKeyUrn) }
+    let isCached: Bool
 
     var body: some View {
         HStack {

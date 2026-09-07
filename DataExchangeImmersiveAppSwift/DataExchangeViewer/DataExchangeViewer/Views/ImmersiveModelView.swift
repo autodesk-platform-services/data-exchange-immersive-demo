@@ -110,7 +110,6 @@ struct ImmersiveModelView: View {
             .padding()
         }
         .task(id: appModel.previewModelURL) {
-            await startWorldTracking()
             await loadModel()
         }
         .task(id: appModel.activeMode) {
@@ -272,8 +271,15 @@ struct ImmersiveModelView: View {
         loadError = nil
         guard let fileURL = appModel.previewModelURL else { return }
 
+        // ARKit session startup and reading the model are independent, so they run concurrently
+        // rather than serializing the file load behind the session. Both have to finish before
+        // the placement transform can be computed, since that needs the device pose.
+        async let session: Void = startWorldTracking()
+        async let model = USDzEntityCache.shared.entity(at: fileURL)
+
         do {
-            let entity = try await Entity(contentsOf: fileURL)
+            let entity = try await model
+            await session
             if let modelName = appModel.previewModelName {
                 entity.isAccessibilityElement = true
                 entity.accessibilityLabelKey = LocalizedStringResource("\(modelName)")

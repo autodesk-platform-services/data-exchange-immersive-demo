@@ -9,6 +9,10 @@ struct ConversionAPI {
     private static let pathSegmentAllowed = CharacterSet(charactersIn:
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
+    private func artifactEndpoint(urn: String, fileName: String) -> URL {
+        endpoint(urn: urn).appendingPathComponent(fileName)
+    }
+
     private func endpoint(urn: String) -> URL {
         // `appendingPathComponent` would double-encode an already percent-encoded segment
         // (it treats '%' itself as a character needing escaping), so the URL is built from
@@ -65,20 +69,59 @@ struct ConversionAPI {
         }
     }
 
-    func artifactData(urn: String, fileName: String, token: String) async throws -> Data {
-        var request = URLRequest(url: endpoint(urn: urn).appendingPathComponent(fileName))
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let http = response as? HTTPURLResponse
-        guard http?.statusCode == 200 else {
-            throw errorForStatus(http, data: data)
-        }
-        return data
+    /// The outcome of an incremental artifact read.
+    enum ArtifactChunk {
+        /// Only the bytes appended since the requested offset.
+        case appended(Data)
+        /// The whole artifact, either because this is the first read or because the service
+        /// answered a range request with a full body.
+        case whole(Data)
+        /// Nothing has been appended since the requested offset.
+        case unchanged
     }
 
-    func artifactText(urn: String, fileName: String, token: String) async throws -> String {
-        let data = try await artifactData(urn: urn, fileName: fileName, token: token)
-        return String(data: data, encoding: .utf8) ?? ""
+    /// Streams an artifact to a temporary file and returns its location; the caller owns the
+    /// file from that point on. `data(for:)` would materialize the whole package in memory
+    /// first — a 400 MB USDZ becomes a 400 MB `Data` before it is ever written to disk.
+    func downloadArtifact(urn: String, fileName: String, token: String) async throws -> URL {
+        var request = URLRequest(url: artifactEndpoint(urn: urn, fileName: fileName))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (fileURL, response) = try await URLSession.shared.download(for: request)
+        let http = response as? HTTPURLResponse
+        guard http?.statusCode == 200 else {
+            // Error bodies are small, so reading this one back is safe — and it carries the
+            // detail the generic status-code message would otherwise lose.
+            let body = (try? Data(contentsOf: fileURL)) ?? Data()
+            try? FileManager.default.removeItem(at: fileURL)
+            throw errorForStatus(http, data: body)
+        }
+        return fileURL
+    }
+
+    /// Reads a text artifact from `offset` onwards, so a growing conversion log is tailed rather
+    /// than refetched in full on every poll. Returns nil when the artifact does not exist.
+    func artifactChunk(
+        urn: String,
+        fileName: String,
+        token: String,
+        from offset: Int
+    ) async throws -> ArtifactChunk? {
+        var request = URLRequest(url: artifactEndpoint(urn: urn, fileName: fileName))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if offset > 0 {
+            request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let http = response as? HTTPURLResponse
+        switch http?.statusCode {
+        // 200 in answer to a range request means the service ignored it, so this is a full body.
+        case 200: return .whole(data)
+        case 206: return .appended(data)
+        // The requested range starts at or past the end of the file: no new output yet.
+        case 416: return .unchanged
+        case 404: return nil
+        default: throw errorForStatus(http, data: data)
+        }
     }
 
     static func findArtifact(_ metadata: ConversionMetadata?, extension ext: String) -> String? {

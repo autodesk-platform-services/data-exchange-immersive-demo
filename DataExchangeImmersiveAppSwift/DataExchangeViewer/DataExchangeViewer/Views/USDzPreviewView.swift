@@ -16,14 +16,7 @@ struct USDzPreviewView: View {
     /// messages — see `unavailableContent`.
     let conversionState: ConversionState
     @Environment(AppModel.self) private var appModel
-    @State private var root = Entity()
-    @State private var portalWorldEntity = Entity()
-    @State private var modelContainer = Entity()
-    @State private var portalPlane = ModelEntity(
-        mesh: .generatePlane(width: 1.0, height: 1.0),
-        materials: [PortalMaterial()]
-    )
-    @State private var loadedEntity: Entity?
+    @State private var portalScene = PortalScene()
     @State private var loadError: String?
 
     /// Fraction of each dimension kept as a gap between the portal opening and the edges of the
@@ -41,33 +34,20 @@ struct USDzPreviewView: View {
                     if appModel.isPeekVisible {
                         GeometryReader3D { geometry in
                             RealityView { content in
-                                portalWorldEntity.components.set(WorldComponent())
-                                portalWorldEntity.addChild(modelContainer)
-                                root.addChild(portalWorldEntity)
-
-                                if let environment = try? await StudioLighting.makeEnvironment() {
-                                    StudioLighting.apply(environment, to: portalWorldEntity)
-                                }
-
-                                portalPlane.components.set(PortalComponent(target: portalWorldEntity))
-                                root.addChild(portalPlane)
-
-                                content.add(root)
+                                content.add(await portalScene.makeRoot())
                             } update: { content in
-                                // Only the model container is touched here, so the lighting/background
-                                // entities added above (siblings under portalWorldEntity) stay in place.
-                                modelContainer.children.removeAll()
-                                if let loadedEntity {
-                                    modelContainer.addChild(loadedEntity)
-                                }
-
+                                // The model is attached from the load task rather than here, so
+                                // this closure only has to keep the portal opening sized — and
+                                // `PortalScene` skips the mesh work when the size is unchanged.
                                 let size = content.convert(geometry.size, from: .local, to: .scene)
-                                let width = size.x * (1 - portalMarginFraction)
-                                let height = size.y * (1 - portalMarginFraction)
-                                portalPlane.model?.mesh = .generatePlane(width: width, height: height, cornerRadius: 0.02)
+                                portalScene.resizePortal(
+                                    width: size.x * (1 - portalMarginFraction),
+                                    height: size.y * (1 - portalMarginFraction)
+                                )
                             }
-                            .frame(depth: 0.4)
                         }
+                        // Depth is set once, on the reader, which proposes it to the RealityView
+                        // inside. It used to be applied on both.
                         .frame(depth: 0.4)
 
                         if let loadError {
@@ -100,18 +80,28 @@ struct USDzPreviewView: View {
             PreviewModePicker(fileURL: fileURL, modelName: modelName)
                 .padding()
         }
-        .task(id: fileURL) {
-            loadedEntity = nil
+        .task(id: PeekModelKey(fileURL: fileURL, isPeekVisible: appModel.isPeekVisible)) {
+            portalScene.setModel(nil)
             loadError = nil
-            guard let fileURL else { return }
+            // Peek gives up its copy of the model while Place or Enter owns the presentation, so
+            // a BIM-scale entity isn't resident in two scenes at once. Coming back to Peek is
+            // still cheap: `USDzEntityCache` clones the already-parsed file.
+            guard appModel.isPeekVisible, let fileURL else { return }
             do {
-                let entity = try await Entity(contentsOf: fileURL)
+                let entity = try await USDzEntityCache.shared.entity(at: fileURL)
                 Self.fitBehindPortal(entity)
-                loadedEntity = entity
+                portalScene.setModel(entity)
             } catch {
                 loadError = "Failed to load preview: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Reloading is driven by the pair, not just the file: the model is released when Peek stops
+    /// being the visible mode and re-attached when it becomes visible again.
+    private struct PeekModelKey: Equatable {
+        let fileURL: URL?
+        let isPeekVisible: Bool
     }
 
     /// Shown in place of the preview whenever there is no USDZ to display. The transient states

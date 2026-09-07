@@ -64,7 +64,11 @@ public sealed class ExchangesController : ControllerBase
         if (await CheckAccessAsync(exchangeUrn) is { } denied) { return denied; }
 
         var file = _conversionService.GetArtifact(exchangeUrn, artifact);
-        return file is null ? NotFound() : File(file.Content, file.ContentType, file.FileName);
+        if (file is null) { return NotFound(); }
+
+        // Streams from disk, and range processing lets a client resume an interrupted USDZ
+        // download or tail the growing conversion log instead of refetching it whole.
+        return PhysicalFile(file.Path, file.ContentType, file.FileName, enableRangeProcessing: true);
     }
 
     // Returns an error result unless a bearer token with access to the exchange is present, otherwise null.
