@@ -16,35 +16,51 @@ final class AppModel {
         case open
     }
 
-    /// The three stages of the spatial preview. Place and Enter share one immersive scene so
-    /// switching between them preserves the loaded entity and its placement.
-    enum PreviewMode: Hashable {
-        /// A framed opening in the flat window, viewed from outside.
-        case peek
-        /// A tabletop-scale model placed directly in the person's surroundings.
-        case place
-        /// The same model expanded to architectural scale for walking through.
-        case enter
-    }
-
-    let immersiveSpaceID = "ImmersiveModelSpace"
+    /// The volumetric window's scene id.
+    let volumeWindowID = "model-volume"
+    /// The immersive space's scene id.
+    let immersiveSpaceID = "model-immersive"
 
     var immersiveSpaceState: ImmersiveSpaceState = .closed
-    var selectedPreviewMode: PreviewMode = .peek
+    /// Whether the volumetric window is on screen. Set by `VolumeView`'s own appearance rather
+    /// than guessed from the mode, because the system can close a volume without asking us.
+    var isVolumeOpen = false
 
-    /// Bound to the single ImmersiveSpace scene. Place uses mixed immersion; Enter uses
-    /// progressive immersion so the Digital Crown remains the system-native comfort control.
-    var immersionStyle: any ImmersionStyle = MixedImmersionStyle()
-    var isFullImmersion = false
+    /// Restored from defaults, and written back on every change, so reopening the app comes back to
+    /// the way the person was looking at models — except Immersive, which never auto-restores.
+    ///
+    /// Computed over private storage rather than a stored property with a `didSet`, because
+    /// `@Observable` synthesises its own accessors for stored properties and a property observer on
+    /// one is at best fragile.
+    var selectedPreviewMode: PreviewMode {
+        get { storedPreviewMode }
+        set {
+            guard newValue != storedPreviewMode else { return }
+            storedPreviewMode = newValue
+            PreviewModeDefaults.store(newValue)
+        }
+    }
 
-    /// Number of mode switches currently in flight. Two overlapping transitions (the picker's
-    /// own task and ImmersiveModelView's `onChange`) each used to set and clear a single Bool,
-    /// so whichever finished first re-enabled the picker while the other was still animating.
+    private var storedPreviewMode: PreviewMode
+
+    /// Immersive mode is `.full` only. Progressive was the previous compromise, where the Digital
+    /// Crown doubled as the comfort control; a 1:1 walkthrough of a building with the room still
+    /// showing through gave two conflicting senses of where the floor was.
+    var immersionStyle: any ImmersionStyle = FullImmersionStyle()
+
+    /// Number of mode switches currently in flight. Two overlapping transitions (the picker's own
+    /// task and a scene's `onChange`) each used to set and clear a single Bool, so whichever
+    /// finished first re-enabled the picker while the other was still animating.
     private var modeSwitchDepth = 0
 
-    /// True for the whole asynchronous open/dismiss sequence, so controls don't accept another
-    /// mode selection while the system is still changing scene presentation.
+    /// True for the whole asynchronous open/dismiss sequence, so controls don't accept another mode
+    /// selection while the system is still changing scene presentation.
     var isSwitchingMode: Bool { modeSwitchDepth > 0 }
+
+    init() {
+        PreviewModeDefaults.migrate()
+        storedPreviewMode = PreviewModeDefaults.restoredMode()
+    }
 
     func beginModeSwitch() {
         modeSwitchDepth += 1
@@ -54,39 +70,47 @@ final class AppModel {
         modeSwitchDepth = max(0, modeSwitchDepth - 1)
     }
 
-    /// The USDZ file the immersive space should display, set right before opening it.
+    /// The USDZ file the preview modes should display.
     var previewModelURL: URL?
 
-    /// The exchange name paired with `previewModelURL`, used only to give the loaded RealityKit
-    /// entity a meaningful VoiceOver label — not needed for the file to load or display.
+    /// The exchange name paired with `previewModelURL`, used to give the loaded RealityKit entity a
+    /// meaningful VoiceOver label — not needed for the file to load or display.
     var previewModelName: String?
 
-    /// The last hand-authored tabletop placement. ImmersiveModelView captures it before Enter or
-    /// dismissal and restores it when the person returns to Place.
-    var placedModelTransform: Transform?
+    /// The portal renders only when it is the active mode and no other scene owns the model. The
+    /// model is a single entity re-parented between scenes, so a portal that kept drawing during
+    /// Volume or Immersive would be drawing an empty world.
+    var isPortalVisible: Bool {
+        selectedPreviewMode == .portal && immersiveSpaceState == .closed && !isVolumeOpen
+    }
 
-    /// The in-window portal is hidden while Place or Enter owns the spatial presentation.
-    var isPeekVisible: Bool { selectedPreviewMode == .peek && immersiveSpaceState == .closed }
-
-    /// Whether a mode switch (of any kind) is currently in flight, for UI that should disable
-    /// input or show a transitional state while it's ambiguous which mode is active.
+    /// Whether a mode switch of any kind is in flight, for UI that should disable input or show a
+    /// transitional state while it's ambiguous which mode is active.
     var isTransitioning: Bool { immersiveSpaceState == .inTransition || isSwitchingMode }
 
     func setPreviewModel(url: URL, name: String) {
-        if previewModelURL != url {
-            placedModelTransform = nil
-        }
         previewModelURL = url
         previewModelName = name
     }
 
+    func clearPreviewModel() {
+        previewModelURL = nil
+        previewModelName = nil
+    }
+
+    /// Called when the immersive space goes away, including when the system dismisses it rather
+    /// than the app. Returning to Portal is what restores the main window's own presentation.
     func immersiveSpaceDidClose() {
         immersiveSpaceState = .closed
-        selectedPreviewMode = .peek
-        // A new Place session should start in front of the person's current position. Placement is
-        // retained while switching Place <-> Enter, but not after explicitly returning to Peek.
-        placedModelTransform = nil
-        isFullImmersion = false
-        immersionStyle = MixedImmersionStyle()
+        selectedPreviewMode = .portal
+    }
+
+    func volumeDidClose() {
+        isVolumeOpen = false
+        // Only fall back to Portal if the volume was the active presentation. A volume closed
+        // *because* the person went immersive must not drag the mode back.
+        if selectedPreviewMode == .volume {
+            selectedPreviewMode = .portal
+        }
     }
 }

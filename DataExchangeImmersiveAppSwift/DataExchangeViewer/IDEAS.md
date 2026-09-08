@@ -51,10 +51,10 @@ visionOS 27 and Xcode 27 are currently beta. Validate API names, availability, p
 - [ ] Select and highlight individual model components.
 - [ ] Add a searchable hierarchy and property panel.
 - [ ] Add isolate, hide, show-all, and selection-set commands.
-- [ ] Add animated explode and collapse controls.
-- [ ] Add one or more cross-section planes using `ClippingComponent`.
+- [x] Add animated explode and collapse controls. Gesture-driven rather than one-shot: a continuous factor mapped from a drag, with the axis chosen from volume-weighted position variance. Direct children of the assembly root only; recursive per-sub-assembly explode is still open.
+- [x] Add one or more cross-section planes using `ClippingComponent`. A three-state section *box* with six draggable, feathered faces now ships in Volume mode; deliberately not offered in Immersive, where a clipping box at 1:1 around the viewer is disorienting.
 - [ ] Save and restore viewpoints and review state.
-- [ ] Move manipulation/input behavior to meaningful child entities instead of manipulating only the whole model.
+- [ ] Move manipulation/input behavior to meaningful child entities instead of manipulating only the whole model. Still whole-model: input targets and colliders are on the model root and on the section box's own handles, since per-part selection needs the USD index above.
 
 **Value:** Very high  
 **Effort:** Medium–large  
@@ -63,10 +63,10 @@ visionOS 27 and Xcode 27 are currently beta. Validate API names, availability, p
 ### Scale to large exchanges
 
 - [ ] Generate multiple LOD representations during conversion.
-- [ ] Attach RealityKit level-of-detail behavior using camera-distance, screen-area, or resolution metrics.
-- [ ] Evaluate RealityKit occlusion culling for complex assemblies.
+- [x] Attach RealityKit level-of-detail behavior using camera-distance, screen-area, or resolution metrics. Camera distance for Immersive, screen area for Portal and Volume — but see LOD generation above: with no authored levels in the artifacts, this currently finds nothing to switch between.
+- [x] Evaluate RealityKit occlusion culling for complex assemblies. Explicitly opted in on the loaded content; most of a building's interior is behind a wall from wherever the viewer stands.
 - [ ] Test new USD mesh compression and AVIF texture packaging against RealityKit, Quick Look, and external consumers.
-- [ ] Adapt quality to device thermal state.
+- [x] Adapt quality to device thermal state. `ThermalQuality` observes `ProcessInfo.thermalStateDidChange` and tightens LOD thresholds and drops dynamic shadows at `.serious`/`.critical`, with a notice so reduced detail doesn't read as a broken export.
 - [ ] Establish frame-time, memory, load-time, and visual-quality acceptance budgets.
 
 **Value:** Very high  
@@ -75,8 +75,8 @@ visionOS 27 and Xcode 27 are currently beta. Validate API names, availability, p
 
 ### Add mixed-immersion review
 
-- [ ] Replace the fixed full-immersion configuration with explicit mixed, progressive, and full choices where appropriate.
-- [ ] Add reliable spatial placement and anchoring.
+- [x] Replace the fixed full-immersion configuration with explicit mixed, progressive, and full choices where appropriate. Resolved differently than written: the three modes are now a plain-window portal, a volumetric window, and a `.full` immersive space. Progressive was dropped — at 1:1 a partly visible room gave two conflicting senses of where the floor was.
+- [x] Add reliable spatial placement and anchoring. Volume mode is placed and resized by the person and the model is re-fitted to its bounds; Immersive positions the model from the device anchor so its entry point lands at the wearer's feet.
 - [ ] Harden scene lifecycle, cancellation, and restoration before adding more scene types.
 - [ ] Evaluate physical-space lighting for mixed-context review.
 - [ ] Compare soft shadows and baked lightmaps with the existing HDRI studio mode.
@@ -207,11 +207,24 @@ Each experiment should have a time box and a measurable go/no-go criterion.
 **Effort:** Extra large  
 **Constraint:** Requires dedicated hardware and physical-device testing.
 
+### Add per-part inspection on top of the tool layer
+
+Volume's tool layer is in place but operates on whole assemblies. What it can't do yet all needs the USD index:
+
+- [ ] Constrain teleport targets with `NavigationMeshResource` over the walkable slabs, so tap-to-teleport in Immersive can't drop someone into the void. There is no teleport at all today — locomotion is the fly puck, the altitude slider, and recentre.
+- [ ] Recursive, per-sub-assembly explode rather than the direct children of one assembly root.
+- [ ] Pull an individual part free of an exploded assembly by hand.
+- [ ] Agree a published `entryPoint` prim convention with the conversion service, so buildings with a clear front door don't fall back to the ground-floor centroid. The app already prefers an authored `entryPoint`/`EntryPoint`/`entry_point` prim wherever one exists.
+
+**Value:** High  
+**Effort:** Medium  
+**Dependency:** The USD/APS index.
+
 ## Defer unless product scope changes
 
 - Real-time cloth simulation.
 - Character skin, eye, and hair rendering.
-- Behavior trees, navigation meshes, and autonomous agents.
+- Behavior trees and autonomous agents. (Navigation meshes have moved out of this list — see the teleport item above.)
 - Custom acoustic reverb meshes and coordinated audio, unless acoustic review or training becomes a goal.
 - Apple Immersive Video production and playback features.
 - Immersive web environments, unless a web sibling is planned.

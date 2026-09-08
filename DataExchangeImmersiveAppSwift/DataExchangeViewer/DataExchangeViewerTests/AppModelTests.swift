@@ -9,37 +9,51 @@ import SwiftUI
 import RealityKit
 @testable import DataExchangeViewer
 
-/// The state machine behind the Peek / Place / Enter picker, which decides when the in-window
-/// portal is visible and when the picker accepts another selection.
+/// The state machine behind the Portal / Volume / Immersive picker, which decides when the
+/// in-window portal renders and when the picker accepts another selection.
 @MainActor
 @Suite("App model")
 struct AppModelTests {
     private let modelURL = URL(fileURLWithPath: "/tmp/model.usdz")
 
-    @Test func startsInPeekWithNoImmersiveSpace() {
+    @Test func startsInPortalWithNothingElseOpen() {
         let model = AppModel()
-        #expect(model.selectedPreviewMode == .peek)
+        model.selectedPreviewMode = .portal
         #expect(model.immersiveSpaceState == .closed)
-        #expect(model.isPeekVisible)
+        #expect(!model.isVolumeOpen)
+        #expect(model.isPortalVisible)
         #expect(!model.isTransitioning)
     }
 
-    /// The portal is hidden while a spatial mode owns the presentation — otherwise the same model
-    /// is on screen twice.
-    @Test func peekIsHiddenWhileTheImmersiveSpaceIsOpen() {
+    /// The portal is hidden while another scene owns the model. It is a single entity re-parented
+    /// between scenes, so a portal that kept drawing would be drawing an empty world.
+    @Test func portalIsHiddenWhileAnotherSceneOwnsTheModel() {
         let model = AppModel()
         model.immersiveSpaceState = .open
-        model.selectedPreviewMode = .place
-        #expect(!model.isPeekVisible)
+        model.selectedPreviewMode = .immersive
+        #expect(!model.isPortalVisible)
 
-        model.selectedPreviewMode = .peek
+        model.selectedPreviewMode = .portal
         // Still open: the space hasn't finished dismissing, so the portal would double up.
-        #expect(!model.isPeekVisible)
+        #expect(!model.isPortalVisible)
+
+        model.immersiveSpaceState = .closed
+        model.isVolumeOpen = true
+        #expect(!model.isPortalVisible)
+
+        model.isVolumeOpen = false
+        #expect(model.isPortalVisible)
     }
 
-    /// Two overlapping transitions (the picker's own task and `ImmersiveModelView.onChange`) used
-    /// to set and clear a single Bool, so whichever finished first re-enabled the picker while the
-    /// other was still animating.
+    /// Immersive is `.full` only — the mode's whole premise is that the room is replaced.
+    @Test func usesFullImmersionOnly() {
+        let model = AppModel()
+        #expect(model.immersionStyle is FullImmersionStyle)
+    }
+
+    /// Two overlapping transitions (the picker's own task and a scene's `onChange`) used to set and
+    /// clear a single Bool, so whichever finished first re-enabled the picker while the other was
+    /// still animating.
     @Test func modeSwitchesNest() {
         let model = AppModel()
         model.beginModeSwitch()
@@ -71,49 +85,22 @@ struct AppModelTests {
         #expect(model.isTransitioning)
     }
 
-    @Test func keepsThePlacementWhenTheSameModelIsSetAgain() {
+    /// Covers system dismissal as well as the picker's own path back, so closing the space always
+    /// lands somewhere the app can render.
+    @Test func closingTheSpaceReturnsToPortal() {
         let model = AppModel()
         model.setPreviewModel(url: modelURL, name: "Basement")
-        model.placedModelTransform = Transform(translation: SIMD3<Float>(1, 2, 3))
-
-        model.setPreviewModel(url: modelURL, name: "Basement")
-        #expect(model.placedModelTransform?.translation == SIMD3<Float>(1, 2, 3))
-    }
-
-    /// A hand-authored placement belongs to one model. Carrying it over to a different exchange
-    /// would drop a differently sized model at the previous one's scale and position.
-    @Test func discardsThePlacementForADifferentModel() {
-        let model = AppModel()
-        model.setPreviewModel(url: modelURL, name: "Basement")
-        model.placedModelTransform = Transform(translation: SIMD3<Float>(1, 2, 3))
-
-        model.setPreviewModel(url: URL(fileURLWithPath: "/tmp/other.usdz"), name: "Roof")
-        #expect(model.placedModelTransform?.translation == nil)
-        #expect(model.previewModelName == "Roof")
-    }
-
-    /// Covers system dismissal as well as the picker's own path back to Peek, so a new session
-    /// starts in front of wherever the person is now.
-    @Test func closingTheSpaceResetsToPeek() {
-        let model = AppModel()
-        model.setPreviewModel(url: modelURL, name: "Basement")
-        model.selectedPreviewMode = .enter
+        model.selectedPreviewMode = .immersive
         model.immersiveSpaceState = .open
-        model.isFullImmersion = true
-        model.immersionStyle = FullImmersionStyle()
-        model.placedModelTransform = Transform(translation: SIMD3<Float>(1, 2, 3))
 
         model.immersiveSpaceDidClose()
 
-        #expect(model.selectedPreviewMode == .peek)
+        #expect(model.selectedPreviewMode == .portal)
         #expect(model.immersiveSpaceState == .closed)
-        #expect(model.placedModelTransform?.translation == nil)
-        #expect(!model.isFullImmersion)
-        #expect(model.immersionStyle is MixedImmersionStyle)
-        #expect(model.isPeekVisible)
+        #expect(model.isPortalVisible)
     }
 
-    /// The model URL survives dismissal: returning to Place should not have to re-convert or
+    /// The model URL survives dismissal: returning to a mode should not have to re-convert or
     /// re-download the exchange.
     @Test func closingTheSpaceKeepsTheLoadedModel() {
         let model = AppModel()
@@ -121,5 +108,39 @@ struct AppModelTests {
         model.immersiveSpaceDidClose()
         #expect(model.previewModelURL == modelURL)
         #expect(model.previewModelName == "Basement")
+    }
+
+    @Test func closingTheVolumeReturnsToPortal() {
+        let model = AppModel()
+        model.selectedPreviewMode = .volume
+        model.isVolumeOpen = true
+
+        model.volumeDidClose()
+
+        #expect(!model.isVolumeOpen)
+        #expect(model.selectedPreviewMode == .portal)
+    }
+
+    /// Going immersive dismisses the volume, and that dismissal must not drag the mode back to
+    /// Portal behind the transition's back.
+    @Test func aVolumeClosedByGoingImmersiveDoesNotChangeTheMode() {
+        let model = AppModel()
+        model.selectedPreviewMode = .volume
+        model.isVolumeOpen = true
+
+        // The picker sets the mode before dismissing the volume, precisely so this holds.
+        model.selectedPreviewMode = .immersive
+        model.volumeDidClose()
+
+        #expect(model.selectedPreviewMode == .immersive)
+        #expect(!model.isVolumeOpen)
+    }
+
+    @Test func clearingTheModelDropsBothTheURLAndTheName() {
+        let model = AppModel()
+        model.setPreviewModel(url: modelURL, name: "Basement")
+        model.clearPreviewModel()
+        #expect(model.previewModelURL == nil)
+        #expect(model.previewModelName == nil)
     }
 }

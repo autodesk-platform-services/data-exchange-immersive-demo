@@ -8,8 +8,6 @@
 	<string>$(APS_CLIENT_ID)</string>
 	<key>APSScopes</key>
 	<string>$(APS_SCOPES)</string>
-	<key>ConversionServiceBaseURL</key>
-	<string>$(CONVERSION_SERVICE_BASE_URL)</string>
 	<key>CFBundleIcons</key>
 	<dict>
 		<key>CFBundlePrimaryIcon</key>
@@ -26,6 +24,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>ConversionServiceBaseURL</key>
+	<string>$(CONVERSION_SERVICE_BASE_URL)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationPreferredDefaultSceneSessionRole</key>
@@ -39,12 +39,10 @@
 				<dict>
 					<key>UISceneImmersionStyles</key>
 					<array>
-						<string>UIImmersionStyleMixed</string>
-						<string>UIImmersionStyleProgressive</string>
 						<string>UIImmersionStyleFull</string>
 					</array>
 					<key>UISceneInitialImmersionStyle</key>
-					<string>UIImmersionStyleMixed</string>
+					<string>UIImmersionStyleFull</string>
 				</dict>
 			</array>
 		</dict>

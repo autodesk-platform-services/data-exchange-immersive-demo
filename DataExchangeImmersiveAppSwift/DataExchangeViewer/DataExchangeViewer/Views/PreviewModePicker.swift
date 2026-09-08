@@ -5,14 +5,20 @@
 
 import SwiftUI
 
-/// Presents previewing as one continuum: Peek in the window, Place the model in the room, or
-/// Enter it at architectural scale. Place and Enter reuse the same immersive scene instead of
-/// dismissing one scene and opening another.
+/// Presents previewing as one continuum — Portal in the window, Volume in the room, Immersive at
+/// full size — and owns the scene transitions between them.
+///
+/// Each mode is a different *kind* of scene (a plain window, a volumetric window, an immersive
+/// space), so switching is asynchronous scene presentation rather than a state change. Keeping that
+/// in one place is what makes "exactly one mode is active" enforceable: every path through `select`
+/// closes whatever the previous mode had open.
 struct PreviewModePicker: View {
     let fileURL: URL?
     let modelName: String
 
     @Environment(AppModel.self) private var appModel
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
@@ -25,11 +31,11 @@ struct PreviewModePicker: View {
         // system material stays legible against arbitrary passthrough where the hardcoded
         // black-and-white capsules did not.
         Picker("Preview mode", selection: modeSelection) {
-            ForEach(Segment.all) { segment in
-                Text(segment.title)
-                    .accessibilityHint(segment.hint)
-                    .disabled(segment.needsModel && fileURL == nil)
-                    .tag(segment.mode)
+            ForEach(PreviewMode.allCases) { mode in
+                Text(mode.title)
+                    .accessibilityHint(mode.hint)
+                    .disabled(mode.requiresModel && fileURL == nil)
+                    .tag(mode)
             }
         }
         .pickerStyle(.segmented)
@@ -41,81 +47,67 @@ struct PreviewModePicker: View {
     }
 
     /// Reads the active mode and routes a new selection through `select`, which owns the
-    /// asynchronous immersive-space work. Writing through a binding keeps the selection the
-    /// picker's own state rather than something reconstructed from button taps.
-    private var modeSelection: Binding<AppModel.PreviewMode> {
+    /// asynchronous scene work. Writing through a binding keeps the selection the picker's own state
+    /// rather than something reconstructed from button taps.
+    private var modeSelection: Binding<PreviewMode> {
         Binding(
             get: { appModel.selectedPreviewMode },
             set: { mode in
-                // A disabled segment shouldn't be reachable, but the guard means a mode that
-                // needs a converted file can never be entered without one.
-                guard mode == .peek || fileURL != nil else { return }
+                // A disabled segment shouldn't be reachable, but the guard means a mode that needs
+                // a converted file can never be entered without one.
+                guard !mode.requiresModel || fileURL != nil else { return }
                 select(mode)
             }
         )
     }
 
-    /// One segment of the picker. Kept as data so the labels, hints, and file requirement live in
-    /// one place instead of being repeated per call.
-    private struct Segment: Identifiable {
-        let mode: AppModel.PreviewMode
-        let title: String
-        let hint: String
-
-        var id: AppModel.PreviewMode { mode }
-        /// Place and Enter both need a converted USDZ; Peek is available while one is on its way.
-        var needsModel: Bool { mode != .peek }
-
-        static let all: [Segment] = [
-            Segment(
-                mode: .peek,
-                title: "Peek",
-                hint: "Shows the model through a framed opening in this window"
-            ),
-            Segment(
-                mode: .place,
-                title: "Place",
-                hint: "Places a model you can move, rotate, and resize in your surroundings"
-            ),
-            Segment(
-                mode: .enter,
-                title: "Enter",
-                hint: "Expands the model to architectural scale with controls for flying through it while stationary"
-            )
-        ]
-    }
-
-    private func select(_ mode: AppModel.PreviewMode) {
+    private func select(_ mode: PreviewMode) {
         guard mode != appModel.selectedPreviewMode else { return }
         Task { @MainActor in
             appModel.beginModeSwitch()
             defer { appModel.endModeSwitch() }
 
             switch mode {
-            case .peek:
-                guard appModel.immersiveSpaceState != .closed else {
-                    appModel.selectedPreviewMode = .peek
-                    return
+            case .portal:
+                // The mode is set first so that the volume's own dismissal handler doesn't also
+                // try to decide what the mode should be.
+                appModel.selectedPreviewMode = .portal
+                if appModel.isVolumeOpen {
+                    dismissWindow(id: appModel.volumeWindowID)
                 }
-                appModel.immersiveSpaceState = .inTransition
-                await dismissImmersiveSpace()
-                // onDisappear owns the final reset because it also covers system dismissal.
+                if appModel.immersiveSpaceState != .closed {
+                    appModel.immersiveSpaceState = .inTransition
+                    await dismissImmersiveSpace()
+                    // The space's own disappearance owns the final reset, because it also covers
+                    // the system dismissing it without asking.
+                }
 
-            case .place, .enter:
+            case .volume:
                 guard let fileURL else { return }
                 appModel.setPreviewModel(url: fileURL, name: modelName)
+                appModel.selectedPreviewMode = .volume
 
-                appModel.selectedPreviewMode = mode
-                appModel.isFullImmersion = false
-                appModel.immersionStyle = mode == .place
-                    ? MixedImmersionStyle()
-                    : ProgressiveImmersionStyle()
+                if appModel.immersiveSpaceState != .closed {
+                    appModel.immersiveSpaceState = .inTransition
+                    await dismissImmersiveSpace()
+                }
+                if !appModel.isVolumeOpen {
+                    openWindow(id: appModel.volumeWindowID)
+                }
 
-                // Changing between Place and Enter only changes the model transform and immersion
-                // style, both of which are already set above. The loaded RealityKit scene remains
-                // alive, so there is no space to open.
-                guard appModel.immersiveSpaceState != .open else { return }
+            case .immersive:
+                guard let fileURL else { return }
+                appModel.setPreviewModel(url: fileURL, name: modelName)
+                appModel.selectedPreviewMode = .immersive
 
+                // Full immersion hides the app's own windows, but a volumetric window left open
+                // behind it is a scene still holding a claim on the model — dismissed explicitly so
+                // the model has exactly one home.
+                if appModel.isVolumeOpen {
+                    dismissWindow(id: appModel.volumeWindowID)
+                }
+
+                guard appModel.immersiveSpaceState == .closed else { return }
                 appModel.immersiveSpaceState = .inTransition
 
                 switch await openImmersiveSpace(id: appModel.immersiveSpaceID) {

@@ -6,32 +6,31 @@
 import SwiftUI
 import RealityKit
 
+/// Portal mode: the model seen through a portal in the app's own plain window, plus the mode picker
+/// that leads to the other two.
+///
+/// This is the default and the cheapest of the three — no passthrough replaced, no volume claimed,
+/// nothing to dismiss. It is also deliberately read-only: no gestures, no tools, one tap to promote
+/// the model into Volume mode where those live.
 struct USDzPreviewView: View {
     let fileURL: URL?
-    /// The exchange's display name, threaded down to the immersive preview so the loaded
-    /// RealityKit entity has a meaningful VoiceOver label.
+    /// The exchange's display name, threaded down so the loaded RealityKit entity has a meaningful
+    /// VoiceOver label.
     let modelName: String
-    /// Why there is no model to show yet. `fileURL` alone can't distinguish "still checking"
-    /// from "nothing converted yet" from "the conversion failed", and those need different
-    /// messages — see `unavailableContent`.
+    /// Why there is no model to show yet. `fileURL` alone can't distinguish "still checking" from
+    /// "nothing converted yet" from "the conversion failed", and those need different messages —
+    /// see `unavailableContent`.
     let conversionState: ConversionState
+
     @Environment(AppModel.self) private var appModel
+    @Environment(ModelStore.self) private var store
+    @Environment(\.openWindow) private var openWindow
+
     @State private var portalScene = PortalScene()
-    @State private var loadError: String?
-    /// A degradation rather than a failure: the model is on screen, but without the studio
-    /// environment it renders effectively unlit. Reported instead of leaving someone to conclude
-    /// the geometry or its materials are broken.
+    /// A degradation rather than a failure: the model is on screen, but without an environment it
+    /// renders as a silhouette against the portal's near-black backdrop. Reported instead of
+    /// leaving someone to conclude the geometry or its materials are broken.
     @State private var lightingWarning: String?
-
-    /// Fraction of each dimension kept as a gap on *each side* between the portal opening and
-    /// the edges of the space it occupies, so it reads as a framed opening rather than content
-    /// that bleeds to the edges. Proportional (rather than a fixed size) so it scales with the
-    /// space instead of swallowing whichever dimension happens to be smaller.
-    private static let portalMarginFraction: Float = 0.025
-
-    /// Depth of the volume the portal looks into. `fitBehindPortal` sizes and positions the model
-    /// against this same value, so the geometry can't end up outside the declared frame.
-    private static let portalDepth: Float = 0.4
 
     var body: some View {
         Group {
@@ -39,92 +38,117 @@ struct USDzPreviewView: View {
                 unavailableContent
             } else {
                 ZStack(alignment: .bottom) {
-                    if appModel.isPeekVisible {
-                        GeometryReader3D { geometry in
-                            RealityView { content in
-                                content.add(await portalScene.makeRoot())
-                                lightingWarning = portalScene.lightingFailure.map {
-                                    "Studio lighting is unavailable, so this model is rendering unlit. \($0.userFacingDescription)"
-                                }
-                            } update: { content in
-                                // The model is attached from the load task rather than here, so
-                                // this closure only has to keep the portal opening sized — and
-                                // `PortalScene` skips the mesh work when the size is unchanged.
-                                let size = content.convert(geometry.size, from: .local, to: .scene)
-                                portalScene.resizePortal(
-                                    width: size.x * (1 - 2 * Self.portalMarginFraction),
-                                    height: size.y * (1 - 2 * Self.portalMarginFraction)
-                                )
-                            }
-                        }
-                        // Depth is set once, on the reader, which proposes it to the RealityView
-                        // inside. It used to be applied on both.
-                        .frame(depth: Double(Self.portalDepth))
-
-                        if let loadError {
-                            Text(loadError)
-                                .foregroundStyle(.red)
-                                .padding()
-                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                        } else if let lightingWarning {
-                            Text(lightingWarning)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding()
-                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                        }
+                    if appModel.isPortalVisible {
+                        portal
+                        notices
                     } else if appModel.isTransitioning {
-                        // Dismissing/opening a window or immersive space are separate windowing
-                        // surfaces with their own lifecycles, so a true cross-fade isn't possible —
-                        // this is an honest "something's happening" state for the gap between them.
+                        // Dismissing and opening windows or immersive spaces are separate
+                        // windowing surfaces with their own lifecycles, so a true cross-fade isn't
+                        // possible — this is an honest "something's happening" state for the gap.
                         ProgressView("Switching view…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         // Explicitly sized so its centered content doesn't get pulled down to the
                         // ZStack's `.bottom` alignment, where it would overlap the controls below.
                         ContentUnavailableView(
-                            appModel.selectedPreviewMode == .enter ? "Inside the model" : "Placed in your space",
-                            systemImage: appModel.selectedPreviewMode == .enter ? "figure.walk" : "move.3d"
+                            appModel.selectedPreviewMode.title,
+                            systemImage: appModel.selectedPreviewMode.symbol,
+                            description: Text(appModel.selectedPreviewMode.hint)
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }
         }
-        // Attached to the outer Group so Peek remains available while the spatial scene is open,
-        // and Place/Enter remain visible (but disabled) before a conversion exists.
+        // Attached to the outer Group so Portal remains available while another scene is open, and
+        // Volume/Immersive remain visible (but disabled) before a conversion exists.
         .ornament(attachmentAnchor: .scene(.bottom)) {
             PreviewModePicker(fileURL: fileURL, modelName: modelName)
                 .padding()
         }
-        .task(id: PeekModelKey(fileURL: fileURL, isPeekVisible: appModel.isPeekVisible)) {
-            portalScene.setModel(nil)
-            loadError = nil
-            // Peek gives up its copy of the model while Place or Enter owns the presentation, so
-            // a BIM-scale entity isn't resident in two scenes at once. Coming back to Peek is
-            // still cheap: `USDzEntityCache` clones the already-parsed file.
-            guard appModel.isPeekVisible, let fileURL else { return }
-            do {
-                let entity = try await USDzEntityCache.shared.entity(at: fileURL)
-                Self.fitBehindPortal(entity)
-                portalScene.setModel(entity)
-            } catch {
-                loadError = "Failed to load preview: \(error.localizedDescription)"
+        .task(id: fileURL) {
+            guard let fileURL else {
+                store.unload()
+                appModel.clearPreviewModel()
+                return
             }
+            appModel.setPreviewModel(url: fileURL, name: modelName)
+            await store.load(url: fileURL, name: modelName)
+        }
+        .onDisappear {
+            store.detach(.portal)
         }
     }
 
-    /// Reloading is driven by the pair, not just the file: the model is released when Peek stops
-    /// being the visible mode and re-attached when it becomes visible again.
-    private struct PeekModelKey: Equatable {
-        let fileURL: URL?
-        let isPeekVisible: Bool
+    private var portal: some View {
+        GeometryReader3D { geometry in
+            RealityView { content in
+                content.add(await portalScene.makeRoot())
+                lightingWarning = portalScene.lightingFailure.map {
+                    "The preview environment is unavailable, so this model is rendering unlit. \($0.userFacingDescription)"
+                }
+            } update: { content in
+                let size = content.convert(geometry.size, from: .local, to: .scene)
+                portalScene.resizePortal(
+                    width: size.x * (1 - 2 * ModelPlacement.portalMarginFraction),
+                    height: size.y * (1 - 2 * ModelPlacement.portalMarginFraction)
+                )
+
+                guard let container = portalScene.modelContainer else { return }
+                store.attach(to: container, as: .portal, activeMode: appModel.selectedPreviewMode)
+                if let root = store.root, store.owner == .portal,
+                   let fit = ModelPlacement.portalFitTransform(bounds: store.bounds) {
+                    root.transform = fit
+                }
+            }
+            .gesture(portalTap)
+        }
+        // Depth is set once, on the reader, which proposes it to the RealityView inside.
+        .frame(depth: Double(ModelPlacement.portalDepth))
+    }
+
+    /// The portal's only interaction. A tap is a deliberately small commitment — it opens the
+    /// volume, where manipulation and the tools live, rather than trying to make a portal in a flat
+    /// window behave like one.
+    private var portalTap: some Gesture {
+        TapGesture()
+            .targetedToAnyEntity()
+            .onEnded { _ in
+                guard let fileURL, store.root != nil else { return }
+                appModel.setPreviewModel(url: fileURL, name: modelName)
+                appModel.selectedPreviewMode = .volume
+                openWindow(id: appModel.volumeWindowID)
+            }
+    }
+
+    @ViewBuilder
+    private var notices: some View {
+        VStack(spacing: 8) {
+            if let message = store.loadError {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+            } else {
+                ForEach(Array(store.warnings)) { warning in
+                    Label(warning.message, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let lightingWarning {
+                    Label(lightingWarning, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding()
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .opacity(store.loadError == nil && store.warnings.isEmpty && lightingWarning == nil ? 0 : 1)
     }
 
     /// Shown in place of the preview whenever there is no USDZ to display. The transient states
     /// (checking, converting, downloading) say what they are waiting on and how far along it is,
-    /// because they resolve on their own; the terminal ones get a `ContentUnavailableView`
-    /// because they need the person to do something.
+    /// because they resolve on their own; the terminal ones get a `ContentUnavailableView` because
+    /// they need the person to do something.
     @ViewBuilder
     private var unavailableContent: some View {
         switch conversionState {
@@ -146,16 +170,16 @@ struct USDzPreviewView: View {
                 Text(message)
             }
 
-        // `.completed` without a file URL isn't reachable today (the store publishes the URL
-        // before the state), but it falls back to the actionable message rather than a spinner.
+        // `.completed` without a file URL isn't reachable today (the store publishes the URL before
+        // the state), but it falls back to the actionable message rather than a spinner.
         case .notConverted, .completed:
             ContentUnavailableView("Run a conversion to preview", systemImage: "cube")
         }
     }
 
-    /// The service reports no percentage for the conversion itself, so a determinate bar would
-    /// have to invent one. Elapsed time is the honest substitute: it shows the wait is still
-    /// moving, and `Text(_:style:)` keeps itself up to date without a timer to start or stop.
+    /// The service reports no percentage for the conversion itself, so a determinate bar would have
+    /// to invent one. Elapsed time is the honest substitute: it shows the wait is still moving, and
+    /// `Text(_:style:)` keeps itself up to date without a timer to start or stop.
     private func convertingContent(_ activity: ConversionActivity) -> some View {
         VStack(spacing: 8) {
             ProgressView("Converting to USDZ")
@@ -171,9 +195,9 @@ struct USDzPreviewView: View {
         .padding()
     }
 
-    /// The download does have a real byte count, and for a multi-hundred-megabyte BIM export it
-    /// is the part of the wait worth measuring. Falls back to an indeterminate bar when the
-    /// service answers without a Content-Length, since the fraction is unknowable then.
+    /// The download does have a real byte count, and for a multi-hundred-megabyte BIM export it is
+    /// the part of the wait worth measuring. Falls back to an indeterminate bar when the service
+    /// answers without a Content-Length, since the fraction is unknowable then.
     @ViewBuilder
     private func downloadingContent(
         _ activity: ConversionActivity,
@@ -198,32 +222,16 @@ struct USDzPreviewView: View {
         .frame(maxWidth: 360)
         .padding()
     }
+}
 
-    /// USDZ files bake in their own arbitrary position/scale, which otherwise lands the model right
-    /// at (or in front of) the portal opening instead of receding behind it. This centers and scales
-    /// the loaded entity so it reads as embedded inside the portal rather than popping out in front
-    /// of the window.
-    ///
-    /// Both faces have to stay inside the volume, which runs from the window plane at z = 0 back to
-    /// z = -`portalDepth`. Centering the model at half that depth and capping its largest dimension
-    /// at the depth less a clearance per side keeps the near face behind the opening and the far
-    /// face off the back wall whatever the model's proportions. A fixed 0.35 m size at z = -0.3 put
-    /// the far face of a cube-ish model at roughly z = -0.475 — outside a 0.4 m volume.
-    private static func fitBehindPortal(_ entity: Entity) {
-        let bounds = entity.visualBounds(relativeTo: nil)
-        let maxDimension = max(bounds.extents.x, bounds.extents.y, bounds.extents.z)
-        guard maxDimension > 0 else { return }
-
-        let clearance: Float = 0.05
-        let scale = (portalDepth - 2 * clearance) / maxDimension
-        entity.scale = SIMD3<Float>(repeating: scale)
-
-        let scaledCenter = bounds.center * scale
-        let centerDepth = -portalDepth / 2
-        entity.position = SIMD3<Float>(
-            -scaledCenter.x,
-            -scaledCenter.y,
-            -scaledCenter.z + centerDepth
-        )
+extension ModelStore.Warning {
+    /// What a degraded model means for the person, rather than what it means to the loader.
+    var message: String {
+        switch self {
+        case .flattenedHierarchy:
+            String(localized: "This export has no named sub-assemblies, so Section and Explode have nothing to separate. Re-export with its hierarchy preserved to use them.")
+        case .unknownUnits:
+            String(localized: "This export doesn't declare its units, so its size in Immersive is a guess.")
+        }
     }
 }

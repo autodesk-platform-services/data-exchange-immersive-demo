@@ -18,168 +18,204 @@ struct ModelPlacementTests {
         #expect(frame.forward ≈ SIMD3<Float>(0, 0, -1))
     }
 
-    @Test func viewerFrameKeepsPositionAndYaw() {
-        let yaw = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 1, 0))
+    @Test func readsThePositionAndHeadingFromTheDevicePose() {
+        let rotation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 1, 0))
         let frame = ModelPlacement.viewerFrame(
-            from: Transform(rotation: yaw, translation: SIMD3<Float>(1, 1.7, -2))
+            from: Transform(rotation: rotation, translation: SIMD3<Float>(1, 1.5, -2))
         )
-        #expect(frame.position ≈ SIMD3<Float>(1, 1.7, -2))
-        // A quarter turn to the left about +Y points -Z towards -X.
+        #expect(frame.position ≈ SIMD3<Float>(1, 1.5, -2))
         #expect(frame.forward ≈ SIMD3<Float>(-1, 0, 0))
     }
 
     /// Pitch is deliberately discarded: a building placed from a downward-looking pose would
-    /// otherwise be tilted into the floor.
-    @Test func viewerFrameDropsPitchAndStaysNormalized() {
+    /// otherwise be tipped over.
+    @Test func discardsPitchFromTheHeading() {
         let pitch = simd_quatf(angle: -.pi / 4, axis: SIMD3<Float>(1, 0, 0))
         let frame = ModelPlacement.viewerFrame(from: Transform(rotation: pitch))
-        #expect(frame.forward.y == 0)
-        #expect(abs(simd_length(frame.forward) - 1) < 1e-5)
         #expect(frame.forward ≈ SIMD3<Float>(0, 0, -1))
     }
 
     /// Looking straight down leaves no horizontal component to normalize.
-    @Test func viewerFrameFallsBackWhenLookingStraightDown() {
+    @Test func usesTheDefaultHeadingWhenLookingStraightDown() {
         let lookingDown = simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(1, 0, 0))
         let frame = ModelPlacement.viewerFrame(from: Transform(rotation: lookingDown))
         #expect(frame.forward ≈ SIMD3<Float>(0, 0, -1))
     }
 
-    // MARK: - Place
+    /// An immersive space's origin is at floor level, so the wearer's feet are their head position
+    /// with the height dropped.
+    @Test func projectsTheViewerOntoTheFloor() {
+        let frame = ModelPlacement.viewerFrame(
+            from: Transform(translation: SIMD3<Float>(0.4, 1.62, -1.1))
+        )
+        #expect(frame.feet ≈ SIMD3<Float>(0.4, 0, -1.1))
+    }
 
-    @Test func placeScalesTheLargestDimensionToTabletopSize() throws {
-        let bounds = BoundingBox(min: SIMD3<Float>(-1, -2, -0.5), max: SIMD3<Float>(1, 2, 0.5))
-        let transform = try #require(ModelPlacement.placedTransform(bounds: bounds, relativeTo: nil))
-        // The largest extent is 4 m tall, so 0.65 / 4.
-        #expect(abs(transform.scale.x - 0.65 / 4) < 1e-6)
+    // MARK: - Portal
+
+    /// Both faces of the model have to stay inside the portal's volume, which runs from the window
+    /// plane at z = 0 back to z = −depth. A fixed size at a fixed depth used to push the far face
+    /// of a cube-ish model straight out through the back.
+    @Test func portalKeepsBothFacesInsideTheVolume() throws {
+        let depth = ModelPlacement.portalDepth
+        // Deliberately off-origin and non-uniform, to catch a fit that positions the origin.
+        let bounds = BoundingBox(min: SIMD3<Float>(4, 4, 4), max: SIMD3<Float>(6, 8, 5))
+        let transform = try #require(ModelPlacement.portalFitTransform(bounds: bounds, depth: depth))
+
+        let near = world(SIMD3<Float>(bounds.center.x, bounds.center.y, bounds.max.z), in: transform)
+        let far = world(SIMD3<Float>(bounds.center.x, bounds.center.y, bounds.min.z), in: transform)
+        #expect(near.z < 0)
+        #expect(far.z > -depth)
+    }
+
+    @Test func portalCentersTheModelInTheOpening() throws {
+        let bounds = BoundingBox(min: SIMD3<Float>(10, -3, 2), max: SIMD3<Float>(14, 1, 6))
+        let transform = try #require(ModelPlacement.portalFitTransform(bounds: bounds))
+
+        let center = world(bounds.center, in: transform)
+        #expect(abs(center.x) < 1e-4)
+        #expect(abs(center.y) < 1e-4)
+        #expect(abs(center.z - -ModelPlacement.portalDepth / 2) < 1e-4)
+    }
+
+    @Test func portalDeclinesGeometryWithNoExtent() {
+        let empty = BoundingBox(min: .zero, max: .zero)
+        #expect(ModelPlacement.portalFitTransform(bounds: empty) == nil)
+    }
+
+    /// The clipping volume has to enclose the same frame the model was fitted into, or the fit and
+    /// the clip disagree and geometry vanishes at the edges.
+    @Test func portalClippingVolumeMatchesTheFittedFrame() {
+        let volume = ModelPlacement.portalClippingVolume(width: 0.8, height: 0.5)
+        #expect(volume.extents ≈ SIMD3<Float>(0.8, 0.5, ModelPlacement.portalDepth))
+        #expect(volume.position ≈ SIMD3<Float>(0, 0, -ModelPlacement.portalDepth / 2))
+    }
+
+    // MARK: - Volume
+
+    @Test func volumeFitsTheBindingAxisAndCentersTheModel() throws {
+        // 40 m wide, 12 m tall, 20 m deep: width is what runs out of room first in a cubic volume.
+        let bounds = BoundingBox(min: SIMD3<Float>(0, 0, 0), max: SIMD3<Float>(40, 12, 20))
+        let extents = SIMD3<Float>(1, 1, 1)
+        let margin = ModelPlacement.volumeMargin
+        let transform = try #require(
+            ModelPlacement.volumeFitTransform(bounds: bounds, volumeExtents: extents, margin: margin)
+        )
+
+        let expectedScale = (1 - 2 * margin) / 40
+        #expect(abs(transform.scale.x - expectedScale) < 1e-6)
+        #expect(world(bounds.center, in: transform) ≈ .zero)
+    }
+
+    /// Uniform, not per-axis: filling the volume on every axis would stretch the building.
+    @Test func volumeScalesUniformly() throws {
+        let bounds = BoundingBox(min: .zero, max: SIMD3<Float>(10, 2, 2))
+        let transform = try #require(
+            ModelPlacement.volumeFitTransform(bounds: bounds, volumeExtents: SIMD3<Float>(1, 1, 1))
+        )
         #expect(transform.scale.x == transform.scale.y)
         #expect(transform.scale.y == transform.scale.z)
-
-        let scaledExtents = bounds.extents * transform.scale.x
-        #expect(abs(max(scaledExtents.x, scaledExtents.y, scaledExtents.z) - 0.65) < 1e-5)
     }
 
-    /// The model's *visual* center — not its origin, which authored geometry often puts far from
-    /// the middle — is what has to end up in front of the wearer.
-    @Test func placePutsTheModelCenterInFrontOfTheViewer() throws {
-        // Bounds deliberately far off-origin, to catch a placement that positions the origin.
-        let bounds = BoundingBox(min: SIMD3<Float>(10, 20, 30), max: SIMD3<Float>(11, 21, 31))
-        let device = Transform(translation: SIMD3<Float>(0, 1.6, 0))
+    /// Every axis of the fitted model has to end up inside the volume, margin included.
+    @Test func volumeFitLeavesTheModelInsideTheBounds() throws {
+        let bounds = BoundingBox(min: SIMD3<Float>(-3, 0, -80), max: SIMD3<Float>(50, 30, 4))
+        let extents = SIMD3<Float>(1.2, 0.8, 1.6)
         let transform = try #require(
-            ModelPlacement.placedTransform(bounds: bounds, relativeTo: device)
-        )
-        // 1.2 m ahead and 25 cm below eye level.
-        #expect(world(bounds.center, in: transform) ≈ SIMD3<Float>(0, 1.35, -1.2))
-    }
-
-    @Test func placeFacesTheModelAtTheViewer() throws {
-        let yaw = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 1, 0))
-        let device = Transform(rotation: yaw, translation: SIMD3<Float>(2, 1.6, 3))
-        let bounds = BoundingBox(min: SIMD3<Float>(repeating: -0.5), max: SIMD3<Float>(repeating: 0.5))
-        let transform = try #require(
-            ModelPlacement.placedTransform(bounds: bounds, relativeTo: device)
+            ModelPlacement.volumeFitTransform(bounds: bounds, volumeExtents: extents)
         )
 
-        let forward = ModelPlacement.viewerFrame(from: device).forward
-        #expect(transform.rotation.act(SIMD3<Float>(0, 0, -1)) ≈ forward)
-        let expectedCenter = device.translation + forward * 1.2 + SIMD3<Float>(0, -0.25, 0)
-        #expect(world(bounds.center, in: transform) ≈ expectedCenter)
+        let scaled = bounds.extents * transform.scale.x
+        let available = extents - SIMD3<Float>(repeating: 2 * ModelPlacement.volumeMargin)
+        #expect(scaled.x <= available.x + 1e-5)
+        #expect(scaled.y <= available.y + 1e-5)
+        #expect(scaled.z <= available.z + 1e-5)
     }
 
-    /// An empty or unloadable scene has no extent to scale, and dividing by it would produce an
-    /// infinite scale. The caller leaves the entity where it is instead.
-    @Test func placeDeclinesGeometryWithNoExtent() {
+    /// A volume smaller than twice the margin has no usable room, and a scale derived from it would
+    /// be negative — which mirrors the model through the origin rather than making it small.
+    @Test func volumeDeclinesAVolumeWithNoRoom() {
+        let bounds = BoundingBox(min: .zero, max: SIMD3<Float>(1, 1, 1))
+        #expect(
+            ModelPlacement.volumeFitTransform(
+                bounds: bounds,
+                volumeExtents: SIMD3<Float>(0.01, 0.01, 0.01)
+            ) == nil
+        )
+    }
+
+    @Test func volumeDeclinesGeometryWithNoExtent() {
         let empty = BoundingBox(min: .zero, max: .zero)
-        #expect(ModelPlacement.placedTransform(bounds: empty, relativeTo: nil) == nil)
+        #expect(
+            ModelPlacement.volumeFitTransform(
+                bounds: empty,
+                volumeExtents: SIMD3<Float>(1, 1, 1)
+            ) == nil
+        )
     }
 
-    // MARK: - Enter scale
+    // MARK: - Immersive
 
-    @Test func enterKeepsTheAuthoredScaleOfARoomSizedModel() {
-        // A 20 x 6 x 15 m building: reach is ~12 m, comfortably inside both clamps.
-        let bounds = BoundingBox(min: SIMD3<Float>(0, 0, 0), max: SIMD3<Float>(20, 6, 15))
-        let reach = ModelPlacement.enteredReach(of: bounds)
-        #expect((ModelPlacement.minimumEnteredModelReach...ModelPlacement.maximumEnteredModelReach).contains(reach))
-        #expect(ModelPlacement.enteredScale(forReach: reach) == 1)
+    /// The default entry point is the middle of the footprint at floor level — not the bounding
+    /// box's centre, which for a multi-storey model is in mid-air between floors.
+    @Test func groundFloorEntryPointSitsOnTheFloorAtTheFootprintCentre() {
+        let bounds = BoundingBox(min: SIMD3<Float>(-10, 0, -5), max: SIMD3<Float>(30, 24, 15))
+        let entry = ModelPlacement.groundFloorEntryPoint(bounds: bounds)
+        #expect(entry ≈ SIMD3<Float>(10, 0, 5))
     }
 
-    /// The regression that made Enter pointless for mechanical parts: a 20 cm bracket stayed 20 cm
-    /// and sat two metres away inside an empty white sphere.
-    @Test func enterScalesSmallGeometryUpToWalkThroughSize() {
-        let bracket = BoundingBox(min: SIMD3<Float>(repeating: -0.1), max: SIMD3<Float>(repeating: 0.1))
-        let scale = ModelPlacement.enteredScale(forReach: ModelPlacement.enteredReach(of: bracket))
-        #expect(scale > 1)
+    @Test func immersiveEntryPutsTheEntryPointAtTheWearersFeet() {
+        let device = Transform(translation: SIMD3<Float>(1.2, 1.6, -0.4))
+        let entryPoint = SIMD3<Float>(10, 0, 5)
+        let transform = ModelPlacement.immersiveEntryTransform(
+            entryPoint: entryPoint,
+            relativeTo: device
+        )
 
-        let scaledReach = ModelPlacement.enteredReach(of: bracket) * scale
-        #expect(abs(scaledReach - ModelPlacement.minimumEnteredModelReach) < 1e-4)
+        let placed = world(entryPoint, in: transform)
+        #expect(placed ≈ SIMD3<Float>(1.2, 0, -0.4))
     }
 
-    @Test func enterScalesSiteSizedGeometryDownIntoTheBackdrop() {
-        let site = BoundingBox(min: SIMD3<Float>(-500, 0, -500), max: SIMD3<Float>(500, 40, 500))
-        let scale = ModelPlacement.enteredScale(forReach: ModelPlacement.enteredReach(of: site))
-        #expect(scale < 1)
-
-        let scaledReach = ModelPlacement.enteredReach(of: site) * scale
-        #expect(abs(scaledReach - ModelPlacement.maximumEnteredModelReach) < 1e-3)
+    /// 1:1 is the whole point of the mode. Anything other than unity scale here means a metre in
+    /// the model is not a metre in the room.
+    @Test func immersiveEntryIsOneToOne() {
+        let transform = ModelPlacement.immersiveEntryTransform(entryPoint: .zero, relativeTo: nil)
+        #expect(transform.scale ≈ SIMD3<Float>(1, 1, 1))
     }
 
-    /// Degenerate geometry must not divide by zero and hand RealityKit an infinite scale.
-    @Test func enterLeavesGeometryWithNoExtentAlone() {
-        #expect(ModelPlacement.enteredScale(forReach: 0) == 1)
-        let empty = BoundingBox(min: .zero, max: .zero)
-        let transform = ModelPlacement.enteredTransform(bounds: empty, relativeTo: nil)
-        #expect(transform.scale.x == 1)
-        #expect(transform.scale.x.isFinite)
+    /// A residual unit correction, if there ever is one, has to scale the entry offset too —
+    /// otherwise the model is the right size but standing in the wrong place.
+    @Test func immersiveEntryAppliesAResidualUnitScale() {
+        let entryPoint = SIMD3<Float>(1000, 0, 0)
+        let transform = ModelPlacement.immersiveEntryTransform(
+            entryPoint: entryPoint,
+            unitScale: 0.001,
+            relativeTo: Transform(translation: SIMD3<Float>(0, 1.6, 0))
+        )
+        #expect(transform.scale ≈ SIMD3<Float>(repeating: 0.001))
+        #expect(world(entryPoint, in: transform) ≈ .zero)
     }
 
-    // MARK: - Enter placement
-
-    @Test func enterStandsTheModelOnTheFloor() {
-        let bounds = BoundingBox(min: SIMD3<Float>(-3, 2, -3), max: SIMD3<Float>(3, 8, 3))
-        let transform = ModelPlacement.enteredTransform(bounds: bounds, relativeTo: nil)
-        // Whatever the authored y offset, the lowest point of the model lands on y = 0.
-        #expect(abs(world(bounds.min, in: transform).y) < 1e-4)
-    }
-
-    @Test func enterPutsTheNearestFaceTwoMetersAhead() {
-        let bounds = BoundingBox(min: SIMD3<Float>(-10, 0, -20), max: SIMD3<Float>(10, 6, 0))
-        let device = Transform(translation: SIMD3<Float>(0, 1.6, 0))
-        let transform = ModelPlacement.enteredTransform(bounds: bounds, relativeTo: device)
-
-        // The center of the face closest to the wearer, at floor level.
-        let nearestFace = SIMD3<Float>(bounds.center.x, 0, bounds.max.z)
-        let placed = world(nearestFace, in: transform)
-        #expect(abs(placed.x) < 1e-4)
-        #expect(abs(placed.z - -2) < 1e-4)
-    }
-
-    @Test func enterPlacesTheModelAlongTheViewerHeading() {
-        let yaw = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
-        let device = Transform(rotation: yaw, translation: SIMD3<Float>(5, 1.6, 5))
-        let bounds = BoundingBox(min: SIMD3<Float>(-10, 0, -20), max: SIMD3<Float>(10, 6, 0))
-        let transform = ModelPlacement.enteredTransform(bounds: bounds, relativeTo: device)
-
-        let forward = ModelPlacement.viewerFrame(from: device).forward
-        let expected = device.translation + forward * 2
-        let placed = world(SIMD3<Float>(bounds.center.x, 0, bounds.max.z), in: transform)
-        // Turned around, so "two metres ahead" is now +Z. Height stays floor-relative.
-        #expect(abs(placed.x - expected.x) < 1e-4)
-        #expect(abs(placed.z - expected.z) < 1e-4)
-        #expect(abs(placed.y) < 1e-4)
-    }
-
-    /// Enter's rotation is yaw-only, so a building never leans no matter how the wearer's head is
-    /// tilted when the mode is entered.
-    @Test func enterKeepsTheModelUpright() {
+    /// Rotation is identity on purpose: at 1:1 you walk inside the geometry, so yawing the building
+    /// to face whichever way someone happened to be looking makes its north arbitrary. Identity is
+    /// also what keeps a loader-levelled model's up axis along gravity.
+    @Test func immersiveEntryLeavesTheModelUprightAndUnrotated() {
         let tilted = Transform(
-            rotation: simd_quatf(angle: .pi / 5, axis: simd_normalize(SIMD3<Float>(1, 0.3, 0))),
+            rotation: simd_quatf(angle: .pi / 3, axis: simd_normalize(SIMD3<Float>(1, 1, 0))),
             translation: SIMD3<Float>(0, 1.6, 0)
         )
-        let bounds = BoundingBox(min: SIMD3<Float>(-5, 0, -5), max: SIMD3<Float>(5, 10, 5))
-        let transform = ModelPlacement.enteredTransform(bounds: bounds, relativeTo: tilted)
+        let transform = ModelPlacement.immersiveEntryTransform(entryPoint: .zero, relativeTo: tilted)
+        #expect(transform.rotation.act(SIMD3<Float>(0, 1, 0)) ≈ SIMD3<Float>(0, 1, 0))
+        #expect(transform.rotation.act(SIMD3<Float>(0, 0, -1)) ≈ SIMD3<Float>(0, 0, -1))
+    }
 
-        let up = transform.rotation.act(SIMD3<Float>(0, 1, 0))
-        #expect(up ≈ SIMD3<Float>(0, 1, 0))
+    @Test func immersiveEntryRejectsANonPositiveUnitScale() {
+        let transform = ModelPlacement.immersiveEntryTransform(
+            entryPoint: .zero,
+            unitScale: 0,
+            relativeTo: nil
+        )
+        #expect(transform.scale ≈ SIMD3<Float>(1, 1, 1))
     }
 }
 
@@ -194,6 +230,6 @@ infix operator ≈: ComparisonPrecedence
 
 /// Component-wise comparison with a tolerance, since every value here is the result of
 /// trigonometry on `Float`.
-private func ≈ (lhs: SIMD3<Float>, rhs: SIMD3<Float>) -> Bool {
+func ≈ (lhs: SIMD3<Float>, rhs: SIMD3<Float>) -> Bool {
     simd_length(lhs - rhs) < 1e-4
 }
