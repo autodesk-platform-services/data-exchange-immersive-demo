@@ -34,7 +34,7 @@ https://github.com/user-attachments/assets/b665195a-1842-4110-9c81-524b529ecf94
   - `ModelPlacement.swift` — the placement arithmetic for all three modes (viewer frame, portal fit and clipping volume, volume fit, immersive entry transform), kept out of the views so it can be checked without a headset.
   - `ExplodeLayout.swift` — axis selection and part spacing, likewise pure and tested.
   - `LocomotionController.swift` / `LocomotionControls.swift` — the world rig's motion and the controls that drive it.
-  - `PreviewEnvironment.swift` — the near-black backdrop and low, graded IBL that Portal and Immersive are shown against.
+  - `PreviewEnvironment.swift` — the white backdrop and low, graded IBL that Portal and Immersive are shown against.
   - `ComfortVignette.swift`, `ThermalQuality.swift`, `LevelOfDetail.swift` — comfort and performance.
 - `AppModel.swift` — shared `@Observable` state coordinating which preview mode/window/immersive space is active, along with the immersion style and the number of mode switches in flight.
 - `Models/PreviewMode.swift`, `Models/PreviewModeDefaults.swift` — the three modes, their person-facing strings, and the one-shot migration off the old `peek`/`place`/`enter` raw values.

@@ -13,15 +13,15 @@ import UIKit
 /// passthrough nor the room's lighting, and full immersion has nothing behind the model at all — so
 /// each needs an environment of its own or the model renders as an unlit silhouette against black.
 ///
-/// The pairing here is deliberate and the previous white-sphere-plus-white-IBL version was the
-/// mistake it was designed to avoid: white CAD geometry lit brightly against a black background
-/// clips to white and loses every edge, and lit dimly against a white background reads as flat
-/// grey. A near-black backdrop with a low, *graded* IBL keeps the silhouette legible and gives
-/// surfaces a top-to-bottom falloff to shade with.
+/// The pairing here is deliberate. The IBL is low and *graded* rather than flat, so a horizontal
+/// surface and a vertical one catch different amounts of it and the model's form reads; under the
+/// current grading the geometry itself comes out dark, so the backdrop is white to keep the
+/// silhouette legible against it.
 enum PreviewEnvironment {
-    /// Backdrop colour. Not pure black: the model's own silhouette has to read against it, and
-    /// against #000 a dark edge simply disappears.
-    static let backdropColor = UIColor(red: 0x14 / 255, green: 0x16 / 255, blue: 0x1A / 255, alpha: 1)
+    /// Backdrop colour. White, for contrast against geometry that the graded IBL leaves dark — an
+    /// unlit white sphere is the brightest thing in the scene, so if full immersion reads as glare
+    /// this is the value to pull down towards off-white.
+    static let backdropColor = UIColor.white
 
     /// Radius of the Immersive backdrop, in meters. Comfortably beyond any building-scale model at
     /// 1:1 so its surface never becomes a visible clipping boundary as someone flies outward.
@@ -71,9 +71,8 @@ enum PreviewEnvironment {
 
     /// An inward-facing, unlit backdrop.
     ///
-    /// Unlit on purpose: a lit backdrop would pick up the IBL and turn into a second light source
-    /// bouncing off the inside of the enclosure, which is how a "near-black" background ends up
-    /// mid-grey.
+    /// Unlit on purpose: a lit backdrop would pick up the IBL and shade top-to-bottom with it,
+    /// turning an even white enclosure into a visibly graded grey one.
     static func makeBackdrop(radius: Float) -> ModelEntity {
         var material = UnlitMaterial()
         material.color = .init(tint: backdropColor)
@@ -86,10 +85,10 @@ enum PreviewEnvironment {
 
     /// A small 2:1 equirectangular map, generated rather than bundled.
     ///
-    /// A vertical gradient, not a flat fill. Flat white light gives every surface of a white model
-    /// the same value, which is exactly the "flat grey" failure — a sky-to-ground gradient means a
-    /// horizontal surface and a vertical one catch different amounts of it, and the model's form
-    /// comes back.
+    /// A vertical gradient, not a flat fill. Flat light gives every surface of a single-colour
+    /// model the same value and the whole thing reads as one flat shape — a sky-to-ground gradient
+    /// means a horizontal surface and a vertical one catch different amounts of it, and the
+    /// model's form comes back.
     ///
     /// Optional rather than force-created: callers already treat a missing environment as "render
     /// without image-based lighting", which is a far better outcome than trapping.
