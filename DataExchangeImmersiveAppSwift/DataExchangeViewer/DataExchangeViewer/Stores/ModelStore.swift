@@ -271,6 +271,20 @@ final class ModelStore {
         }
     }
 
+    /// Rebuilds the offsets from the rest pose in the model's metric coordinate frame.
+    /// Convert offsets back to the assembly frame so authored rotation and units are respected.
+    func setExplodeAxis(_ axis: ToolAxis) {
+        resetExplode(animated: false)
+        explodeAxis = axis.direction
+        guard let assembly, let clipRoot else { return }
+        let children = explodableParts
+        let parts = children.map { ExplodeLayout.Part(bounds: $0.visualBounds(relativeTo: clipRoot)) }
+        let offsets = ExplodeLayout.offsets(for: parts, along: axis.direction)
+        for (child, offset) in zip(children, offsets) {
+            explodeOffsets[child] = assembly.convert(direction: offset, from: clipRoot)
+        }
+    }
+
     /// The parts the explode tool moves, in a stable order.
     var explodableParts: [Entity] {
         assembly?.children.filter { explodeOffsets[$0] != nil } ?? []

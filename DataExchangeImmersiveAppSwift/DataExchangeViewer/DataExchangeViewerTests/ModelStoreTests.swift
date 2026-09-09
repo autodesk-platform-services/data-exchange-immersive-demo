@@ -294,6 +294,36 @@ struct ModelStoreTests {
         #expect(store.root?.parent == nil)
     }
 
+    @Test func chosenExplodeAxesRespectAuthoredRotationAndScale() async throws {
+        let (store, url) = try await load(buildingUSDA())
+        defer { try? FileManager.default.removeItem(at: url) }
+        let assembly = try #require(store.assembly)
+        let clipRoot = try #require(store.clipRoot)
+        assembly.orientation = simd_quatf(angle: .pi / 3, axis: [0, 0, 1])
+        assembly.scale *= 2
+        let tool = ExplodeTool()
+        tool.bind(to: store)
+        #expect(tool.activate())
+        for axis in ToolAxis.allCases {
+            tool.setAxis(axis)
+            let starts = store.explodableParts.map { $0.position(relativeTo: clipRoot) }
+            tool.beginDrag()
+            tool.updateDrag(displacement: axis.direction * store.bounds.extents[axis.index] * ExplodeTool.travelFraction)
+            #expect(abs(tool.factor - 1) < 0.0001)
+            let deltas = zip(store.explodableParts, starts).map { $0.position(relativeTo: clipRoot) - $1 }
+            #expect(deltas.contains { simd_length($0) > 0.001 })
+            for delta in deltas {
+                for other in ToolAxis.allCases where other != axis {
+                    #expect(abs(delta[other.index]) < 0.001)
+                }
+            }
+        }
+        tool.deactivate()
+        for part in store.explodableParts {
+            #expect(part.transform == store.restTransforms[part])
+        }
+    }
+
     private func partHeight(_ entity: Entity) -> Float {
         entity.position.y
     }

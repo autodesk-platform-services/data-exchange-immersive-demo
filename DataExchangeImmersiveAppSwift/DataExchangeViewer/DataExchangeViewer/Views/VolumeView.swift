@@ -7,8 +7,8 @@ import SwiftUI
 import RealityKit
 import simd
 
-/// Volume mode: the model in a volumetric window the person places and resizes, with the section
-/// and explode tools.
+/// Volume mode: the model in a volumetric window the person places and resizes, with clipping,
+/// directional explode, and surface measurement tools.
 ///
 /// The volume's position and size belong to them, not to the app — there is no API to move a
 /// volumetric window and it would be the wrong thing to do anyway. What the app owns is the fit:
@@ -17,13 +17,17 @@ import simd
 struct VolumeView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(ModelStore.self) private var store
-    @Environment(\.dismissWindow) private var dismissWindow
 
     @State private var anchor = Entity()
     @State private var section = SectionBoxTool()
+    @State private var plane = PlaneClippingTool()
+    @State private var measure = MeasureTool()
     @State private var explode = ExplodeTool()
     @State private var activeTool: ActiveTool = .none
     @State private var thermal = ThermalQuality()
+    @State private var clippingInput = ModelCollisionOverride()
+    @State private var fittedModel: Entity?
+    @State private var fittedExtents: SIMD3<Float>?
 
     /// Which entity the current drag started on, so a drag that began on a section handle keeps
     /// going to the section tool even if the hand wanders off the handle mid-gesture.
@@ -39,6 +43,7 @@ struct VolumeView: View {
     }
 
     private enum DragTarget: Equatable {
+        case plane
         case sectionFace(SectionBoxGeometry.Face)
         case explode
     }
@@ -57,12 +62,16 @@ struct VolumeView: View {
                 // Re-fitted on every bounds change, which is the only way the volume's size
                 // changes: the person resizing it.
                 let extents = content.convert(geometry.size, from: .local, to: .scene)
-                if let fit = ModelPlacement.volumeFitTransform(bounds: store.bounds, volumeExtents: extents) {
+                if fittedModel !== root || fittedExtents != extents,
+                   let fit = ModelPlacement.volumeFitTransform(bounds: store.bounds, volumeExtents: extents) {
                     root.transform = fit
+                    fittedModel = root
+                    fittedExtents = extents
                 }
                 applyManipulation(to: root)
             }
-            .gesture(toolDrag, isEnabled: activeTool != .none)
+            .gesture(toolDrag, isEnabled: activeTool != .none && activeTool != .measure)
+            .simultaneousGesture(measureTap, isEnabled: activeTool == .measure)
         }
         .ornament(attachmentAnchor: .scene(.bottom)) {
             toolbar
@@ -78,6 +87,9 @@ struct VolumeView: View {
                 for: .volume,
                 thermallyConstrained: thermal.isConstrained
             )
+        }
+        .task(id: activeTool) {
+            if activeTool == .measure { await measure.prepare() }
         }
         .task(id: activeTool) {
             guard activeTool == .none, !hasSeenManipulationHint, store.root != nil else { return }
@@ -98,6 +110,12 @@ struct VolumeView: View {
             // Portal and Immersive never inherit a half-exploded or clipped model.
             explode.deactivate()
             section.deactivate()
+            plane.deactivate()
+            measure.deactivate()
+            clippingInput.restore()
+            fittedModel = nil
+            fittedExtents = nil
+            dragTarget = nil
             activeTool = .none
             store.detach(.volume)
             appModel.volumeDidClose()
@@ -115,7 +133,17 @@ struct VolumeView: View {
     // MARK: - Tools
 
     private func bindTools() {
-        guard let clipRoot = store.clipRoot, let overlay = store.toolOverlay else { return }
+        dragTarget = nil
+        clippingInput.restore()
+        section.deactivate()
+        plane.deactivate()
+        measure.deactivate()
+        explode.deactivate()
+        activeTool = .none
+        guard let root = store.root, let clipRoot = store.clipRoot, let overlay = store.toolOverlay else { return }
+        overlay.isEnabled = true
+        plane.bind(clipRoot: clipRoot, overlay: overlay, bounds: store.bounds)
+        measure.bind(root: root, clipRoot: clipRoot, overlay: overlay, bounds: store.bounds)
         section.bind(
             clipRoot: clipRoot,
             handleRoot: overlay,
@@ -126,7 +154,7 @@ struct VolumeView: View {
         activeTool = .none
     }
 
-    /// Activating one tool deactivates the other, and both suspend whole-model manipulation.
+    /// Tools are exclusive and suspend whole-model manipulation.
     ///
     /// Not a nicety: `ManipulationComponent`, the section box, and explode all write entity
     /// transforms, and two of them live at once produces a fight per frame rather than a
@@ -135,13 +163,27 @@ struct VolumeView: View {
         let newTool = activeTool == tool ? .none : tool
         guard newTool != activeTool else { return }
 
+        dragTarget = nil
+        section.endDrag()
+        explode.endDrag()
+        showManipulationHint = false
         switch activeTool {
+        case .plane: plane.deactivate()
+        case .measure: measure.deactivate()
         case .section: section.deactivate()
         case .explode: explode.deactivate()
         case .none: break
         }
 
+        clippingInput.restore()
+
         switch newTool {
+        case .plane:
+            plane.activate()
+            activeTool = .plane
+        case .measure:
+            measure.activate()
+            activeTool = .measure
         case .section:
             section.activate()
             activeTool = .section
@@ -151,6 +193,10 @@ struct VolumeView: View {
             activeTool = explode.activate() ? .explode : .none
         case .none:
             activeTool = .none
+        }
+        if newTool == .plane || newTool == .section,
+           let root = store.root, let clipRoot = store.clipRoot {
+            clippingInput.suspend(root: root, clipRoot: clipRoot)
         }
     }
 
@@ -173,7 +219,7 @@ struct VolumeView: View {
 
     // MARK: - Gestures
 
-    /// One drag gesture for both tools, routed by what it started on.
+    /// One drag gesture for clipping and explode, routed by what it started on.
     ///
     /// Installed only while a tool is active, so in the default state the system's own manipulation
     /// gestures own every pinch — a custom drag alongside them competes for the same input.
@@ -193,6 +239,8 @@ struct VolumeView: View {
                 let displacement = value.convert(value.translation3D, from: .local, to: clipRoot)
 
                 switch dragTarget {
+                case .plane:
+                    plane.updateDrag(displacement: displacement)
                 case .sectionFace:
                     section.updateDrag(displacement: displacement)
                 case .explode:
@@ -203,6 +251,7 @@ struct VolumeView: View {
             }
             .onEnded { _ in
                 switch dragTarget {
+                case .plane: break
                 case .sectionFace: section.endDrag()
                 case .explode: explode.endDrag()
                 case nil: break
@@ -211,7 +260,21 @@ struct VolumeView: View {
             }
     }
 
+    private var measureTap: some Gesture {
+        SpatialTapGesture()
+            .targetedToAnyEntity()
+            .onEnded { value in
+                guard activeTool == .measure, measure.accepts(value.entity),
+                      let clipRoot = store.clipRoot else { return }
+                measure.addPoint(value.convert(value.location3D, from: .local, to: clipRoot))
+            }
+    }
+
     private func begin(on entity: Entity) -> DragTarget? {
+        if activeTool == .plane, plane.owns(entity) {
+            plane.beginDrag()
+            return .plane
+        }
         if activeTool == .section, let face = section.face(for: entity) {
             section.beginDrag(face: face)
             return .sectionFace(face)
@@ -239,7 +302,11 @@ struct VolumeView: View {
                     .transition(.opacity)
             }
 
-            if activeTool == .section {
+            if activeTool == .plane {
+                planeControls
+            } else if activeTool == .measure {
+                measureControls
+            } else if activeTool == .section {
                 sectionControls
             } else if activeTool == .explode {
                 explodeControls
@@ -252,6 +319,7 @@ struct VolumeView: View {
                     } label: {
                         Label(tool.title, systemImage: tool.symbol)
                     }
+                    .disabled(store.root == nil || (tool == .explode && store.explodableParts.count < 2))
                     .buttonStyle(.bordered)
                     .tint(activeTool == tool ? .accentColor : nil)
                     .accessibilityHint(tool.hint)
@@ -267,6 +335,63 @@ struct VolumeView: View {
             )
         }
         .padding()
+    }
+
+    private func axisPicker(selection: Binding<ToolAxis>) -> some View {
+        Picker("Axis", selection: selection) {
+            ForEach(ToolAxis.allCases) { axis in Text(axis.rawValue).tag(axis) }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 220)
+    }
+
+    private var planeControls: some View {
+        VStack(spacing: 8) {
+            Text("Pinch and drag the plane to move the cut")
+                .font(.caption)
+            axisPicker(selection: Binding(get: { plane.axis }, set: { plane.setAxis($0) }))
+            Slider(value: Binding(get: { plane.fraction }, set: { plane.setFraction($0) }), in: 0...1) {
+                Text("Plane position")
+            }
+            .frame(width: 260)
+            HStack {
+                Button("Flip Cut") { plane.flip() }
+                Button(plane.showsHandle ? "Hide Plane" : "Show Plane") { plane.toggleHandle() }
+                Button("Reset Plane") { plane.reset() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(8)
+        .glassBackgroundEffect()
+    }
+
+    private var measureControls: some View {
+        VStack(spacing: 8) {
+            if measure.isPreparing {
+                ProgressView("Preparing design surfaces…")
+            } else if let error = measure.error {
+                Text(error).foregroundStyle(.red)
+            } else if let distance = measure.distance {
+                Text(Measurement(value: Double(distance), unit: UnitLength.meters),
+                     format: .measurement(width: .abbreviated, usage: .asProvided,
+                                          numberFormatStyle: .number.precision(.fractionLength(3))))
+                    .font(.title2.monospacedDigit())
+                Text("Pinch another point to start a new measurement")
+                    .font(.caption)
+            } else {
+                Text(measure.points.isEmpty ? "Pinch the first point on the design" : "Pinch the second point on the design")
+            }
+            if store.warnings.contains(.unknownUnits) {
+                Text("Model units are unknown; the distance uses the imported scale.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Button("Clear Measurement") { measure.clear() }
+                .disabled(measure.points.isEmpty)
+        }
+        .padding(8)
+        .glassBackgroundEffect()
     }
 
     private var sectionControls: some View {
@@ -296,6 +421,7 @@ struct VolumeView: View {
 
     private var explodeControls: some View {
         VStack(spacing: 4) {
+            axisPicker(selection: Binding(get: { explode.axis }, set: { explode.setAxis($0) }))
             Text("Drag the model to separate its parts \(explode.axisName)")
                 .font(.caption)
                 .foregroundStyle(.secondary)

@@ -21,6 +21,7 @@ import simd
 @Observable
 final class ExplodeTool {
     private(set) var isActive = false
+    private(set) var axis: ToolAxis = .y
 
     /// How far along the explode, 0…1. Observed by the toolbar's readout.
     private(set) var factor: Float = 0
@@ -35,7 +36,9 @@ final class ExplodeTool {
     private var dragStartFactor: Float = 0
 
     func bind(to store: ModelStore) {
+        deactivate()
         self.store = store
+        axis = .y
         isActive = false
         factor = 0
     }
@@ -45,17 +48,18 @@ final class ExplodeTool {
     @discardableResult
     func activate() -> Bool {
         guard let store, store.explodableParts.count > 1 else { return false }
+        store.setExplodeAxis(axis)
         isActive = true
         factor = 0
         return true
     }
 
-    /// Animates the parts home and gives their transforms back.
+    /// Restores parts before another tool takes ownership of the model.
     func deactivate() {
         guard isActive else { return }
         isActive = false
         factor = 0
-        store?.resetExplode(animated: true)
+        store?.resetExplode(animated: false)
     }
 
     func beginDrag() {
@@ -66,7 +70,7 @@ final class ExplodeTool {
     func updateDrag(displacement: SIMD3<Float>) {
         guard isActive, let store else { return }
 
-        let axis = store.explodeAxis
+        let axis = axis.direction
         let extent = abs(simd_dot(store.bounds.extents, axis))
         let travel = max(extent * Self.travelFraction, 0.001)
         let along = simd_dot(displacement, axis)
@@ -87,13 +91,13 @@ final class ExplodeTool {
         store.setExplodeFactor(factor)
     }
 
-    /// A description of the axis for the toolbar, so the person can see *why* the model is coming
-    /// apart the way it is — and tell a wrong axis from a wrong model.
-    var axisName: String {
-        guard let store else { return "" }
-        let axis = store.explodeAxis
-        if abs(axis.y) > 0.9 { return String(localized: "vertically") }
-        if abs(axis.x) > 0.9 { return String(localized: "left to right") }
-        return String(localized: "front to back")
+    func setAxis(_ axis: ToolAxis) {
+        guard isActive else { return }
+        self.axis = axis
+        store?.setExplodeAxis(axis)
+        factor = 0
+        dragStartFactor = 0
     }
+
+    var axisName: String { "along \(axis.rawValue)" }
 }

@@ -103,6 +103,7 @@ final class SectionBoxTool {
     /// section rather than starting over from the model's full extent.
     func deactivate() {
         state = .off
+        dragFace = nil
         if let modelKey {
             cache[modelKey] = bounds
         }
@@ -223,7 +224,6 @@ final class SectionBoxTool {
 
     private func updateHandleVisibility() {
         let visible = state == .editing
-        handleRoot?.isEnabled = visible
         for handle in handles.values {
             handle.isEnabled = visible
         }
