@@ -49,7 +49,7 @@ The endpoint will return JSON object with extraction metadata:
     "foo.obj",
     "foo.mtl",
     "foo.glb",            // glTF binary post-processed from the OBJ/MTL via SharpGLTF
-    "foo.usdz"            // USDZ package post-processed from the OBJ/MTL
+    "foo.usdz"            // USDZ package bundled from the SDK's native USD folder
   ]
 }
 ```

@@ -200,14 +200,16 @@ public sealed class ConversionService
                 metadata.FileVersionUrn = details.FileVersionUrn;
             }
 
+            var exchangeIdentifier = new DataExchangeIdentifier
+            {
+                ExchangeId = details.ExchangeID,
+                CollectionId = details.CollectionID,
+                HubId = details.HubId,
+            };
+
             Step("downloading exchange as OBJ");
             var downloadResponse = client.DownloadCompleteExchangeAsOBJ(
-                new DataExchangeIdentifier
-                {
-                    ExchangeId = details.ExchangeID,
-                    CollectionId = details.CollectionID,
-                    HubId = details.HubId,
-                },
+                exchangeIdentifier,
                 outputFolder,
                 CancellationToken.None);
 
@@ -217,7 +219,7 @@ public sealed class ConversionService
                     $"The Data Exchange SDK could not download the exchange as OBJ: {string.Join("; ", downloadResponse.Errors)}");
             }
 
-            var tempFolder = downloadResponse.Value;
+            var tempFolder = GetDownloadFolder(downloadResponse.Value, "OBJ");
             Log("Data Exchange extraction completed.");
 
             foreach (var sourcePath in Directory.GetFiles(tempFolder))
@@ -233,17 +235,18 @@ public sealed class ConversionService
             Directory.Delete(tempFolder, recursive: true);
             ForceFullGarbageCollection(_logger, "Data Exchange to OBJ conversion");
 
-            // Post-process each generated OBJ into a self-contained binary glTF (*.glb) and a
-            // USDZ package (*.usdz).
-            foreach (var objFileName in metadata.Artifacts
+            // Post-process each generated OBJ into a self-contained binary glTF (*.glb).
+            // USDZ is built separately from the SDK's native USD output below.
+            var objFileNames = metadata.Artifacts
                 .Where(name => name.EndsWith(".obj", StringComparison.OrdinalIgnoreCase))
-                .ToList())
+                .ToList();
+            foreach (var objFileName in objFileNames)
             {
                 var objPath = Path.Combine(outputFolder, objFileName);
                 var memory = new MemoryTelemetry(_logger, "Exchange post-processing", logPath);
 
-                // The extraction emits Z-up geometry; both converters rotate it to the Y-up
-                // convention that OBJ/glTF/USD viewers assume on the fly as they stream the OBJ.
+                // The extraction emits Z-up geometry; rotate it to the Y-up convention used by
+                // glTF viewers while streaming the OBJ.
                 var glbFileName = Path.ChangeExtension(objFileName, ".glb");
                 var glbPath = Path.Combine(outputFolder, glbFileName);
                 Step($"converting OBJ {objFileName} to GLB {glbFileName}");
@@ -253,20 +256,37 @@ public sealed class ConversionService
                 }
                 metadata.Artifacts.Add(glbFileName);
                 ForceFullGarbageCollection(_logger, "OBJ to GLB conversion");
-
-                var usdzFileName = Path.ChangeExtension(objFileName, ".usdz");
-                var usdzPath = Path.Combine(outputFolder, usdzFileName);
-                Step($"converting OBJ {objFileName} to USDZ {usdzFileName}");
-                using (memory.Step("convert OBJ to USDZ"))
-                {
-                    UsdzConverter.ConvertObjToUsdz(objPath, usdzPath, convertZUpToYUp: true, logger: _logger, logPath: logPath);
-                }
-                metadata.Artifacts.Add(usdzFileName);
-                ForceFullGarbageCollection(_logger, "OBJ to USDZ conversion");
             }
 
+            Step("downloading exchange as USD");
+            var usdDownloadResponse = client.DownloadCompleteExchangeAsUSD(
+                exchangeIdentifier,
+                outputFolder,
+                CancellationToken.None);
+
+            if (!usdDownloadResponse.IsSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"The Data Exchange SDK could not download the exchange as USD: {string.Join("; ", usdDownloadResponse.Errors)}");
+            }
+
+            var usdFolder = GetDownloadFolder(usdDownloadResponse.Value, "USD");
+            Log("Data Exchange USD extraction completed.");
+
+            var usdzFileName = objFileNames.Count > 0
+                ? Path.ChangeExtension(objFileNames[0], ".usdz")
+                : "exchange.usdz";
+            var usdzPath = Path.Combine(outputFolder, usdzFileName);
+            Step($"bundling downloaded USD files into {usdzFileName}");
+            UsdzConverter.BundleUsdFolder(usdFolder, usdzPath, _logger, logPath);
+            metadata.Artifacts.Add(usdzFileName);
+
+            Step("deleting USD temp folder");
+            Directory.Delete(usdFolder, recursive: true);
+            ForceFullGarbageCollection(_logger, "USD to USDZ bundling");
+
             metadata.Status = ConversionStatus.Completed;
-            Log($"OBJ conversion completed. Artifacts: {string.Join(", ", metadata.Artifacts)}.");
+            Log($"Exchange conversion completed. Artifacts: {string.Join(", ", metadata.Artifacts)}.");
         }
         catch (Exception ex)
         {
@@ -312,6 +332,25 @@ public sealed class ConversionService
             HostApplicationVersion = "1.0.0",
             AuthProvider = new BearerTokenAuthProvider(bearerToken),
         });
+    }
+
+    private static string GetDownloadFolder(string downloadPath, string format)
+    {
+        if (Directory.Exists(downloadPath))
+        {
+            return downloadPath;
+        }
+
+        if (File.Exists(downloadPath))
+        {
+            return Path.GetDirectoryName(downloadPath)
+                ?? throw new InvalidOperationException(
+                    $"The Data Exchange SDK returned a {format} file path without a parent folder: '{downloadPath}'.");
+        }
+
+        throw new FileNotFoundException(
+            $"The Data Exchange SDK returned a {format} download path that does not exist: '{downloadPath}'.",
+            downloadPath);
     }
 
     private static void WriteMetadata(string outputFolder, ConversionMetadata metadata)
