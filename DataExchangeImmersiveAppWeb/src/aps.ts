@@ -24,6 +24,8 @@ export interface Project {
 export interface Exchange {
   id: string;
   name: string;
+  // SDK v8 requires the collection (project) ID together with the exchange URN.
+  collectionId: string;
   // Lineage (file) URN — forwarded to the conversion service and used to look the exchange up.
   fileUrn: string;
   // Specific version URN — what the APS Viewer loads via Model Derivative.
@@ -84,10 +86,11 @@ interface RawFolder {
   folders?: Results<{ exchanges?: Results<RawExchange> | null }> | null;
 }
 
-function toExchange(exchange: RawExchange): Exchange {
+function toExchange(exchange: RawExchange, collectionId: string): Exchange {
   return {
     id: exchange.id,
     name: exchange.name,
+    collectionId,
     fileUrn: exchange.alternativeIdentifiers?.fileUrn ?? "",
     fileVersionUrn: exchange.alternativeIdentifiers?.fileVersionUrn ?? "",
   };
@@ -121,7 +124,9 @@ export async function getExchanges(token: string, projectId: string): Promise<Ex
     }`,
   );
   return data.project.folders.results.flatMap((folder) => [
-    ...(folder.exchanges?.results ?? []).map(toExchange),
-    ...(folder.folders?.results ?? []).flatMap((sub) => (sub.exchanges?.results ?? []).map(toExchange)),
+    ...(folder.exchanges?.results ?? []).map((exchange) => toExchange(exchange, projectId)),
+    ...(folder.folders?.results ?? []).flatMap((sub) =>
+      (sub.exchanges?.results ?? []).map((exchange) => toExchange(exchange, projectId)),
+    ),
   ]);
 }

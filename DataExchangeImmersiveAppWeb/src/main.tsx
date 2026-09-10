@@ -299,12 +299,14 @@ function ViewerTab({ token, exchange }: { token: string; exchange: Exchange }) {
 function ArtifactTab({
   token,
   urn,
+  collectionId,
   status,
   extension,
   render,
 }: {
   token: string;
   urn: string;
+  collectionId: string;
   status: ConversionStatus | null | undefined;
   extension: string;
   render: (blobUrl: string) => React.ReactNode;
@@ -318,7 +320,7 @@ function ArtifactTab({
       return;
     }
     let revoked: string | null = null;
-    fetchArtifactBlob(token, urn, fileName).then((url) => {
+    fetchArtifactBlob(token, urn, collectionId, fileName).then((url) => {
       revoked = url;
       setBlobUrl(url);
     });
@@ -326,7 +328,7 @@ function ArtifactTab({
     return () => {
       if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [token, urn, fileName]);
+  }, [token, urn, collectionId, fileName]);
 
   if (status?.status !== "completed") {
     return <div className="tab-body placeholder">Run a conversion to view the {extension} artifact.</div>;
@@ -354,10 +356,12 @@ function ArtifactTab({
 function LogsTab({
   token,
   urn,
+  collectionId,
   status,
 }: {
   token: string;
   urn: string;
+  collectionId: string;
   status: ConversionStatus | null | undefined;
 }) {
   const [text, setText] = useState<string | null>(null);
@@ -368,7 +372,7 @@ function LogsTab({
   useEffect(() => {
     if (!status) return;
     let cancelled = false;
-    fetchArtifactText(token, urn, "log.txt").then(
+    fetchArtifactText(token, urn, collectionId, "log.txt").then(
       (contents) => {
         if (!cancelled) {
           setText(contents);
@@ -382,7 +386,7 @@ function LogsTab({
     return () => {
       cancelled = true;
     };
-  }, [token, urn, status]);
+  }, [token, urn, collectionId, status]);
 
   if (!status) {
     return <div className="tab-body placeholder">Run a conversion to view logs.</div>;
@@ -424,31 +428,32 @@ function MainPane({
   // The conversion/viewing service identifies an exchange by its URL-encoded lineage URN
   // (urn:adsk.wipprod:dm.lineage:...), i.e. the exchange's fileUrn — not the GraphQL exchange id.
   const urn = exchange.fileUrn;
+  const collectionId = exchange.collectionId;
 
   // As soon as an exchange is selected, check the viewing service for already-available artifacts.
   // The GLB/USDZ/logs tabs and the convert/delete button stay disabled until this first check settles.
   useEffect(() => {
     setStatus(undefined);
     setTab("viewer");
-    getStatus(token, urn).then(setStatus, () => setStatus(null));
-  }, [token, urn]);
+    getStatus(token, urn, collectionId).then(setStatus, () => setStatus(null));
+  }, [token, urn, collectionId]);
 
   // Poll while a conversion is running.
   useEffect(() => {
     if (status?.status !== "running") return;
     const timer = setInterval(() => {
-      getStatus(token, urn).then(setStatus, () => {});
+      getStatus(token, urn, collectionId).then(setStatus, () => {});
     }, 3000);
     return () => clearInterval(timer);
-  }, [token, urn, status?.status]);
+  }, [token, urn, collectionId, status?.status]);
 
   async function convert() {
-    await startConversion(token, urn);
+    await startConversion(token, urn, collectionId);
     setStatus({ status: "running", artifacts: [] });
   }
 
   async function remove() {
-    await deleteConversion(token, urn);
+    await deleteConversion(token, urn, collectionId);
     setStatus(null);
   }
 
@@ -493,6 +498,7 @@ function MainPane({
         <ArtifactTab
           token={token}
           urn={urn}
+          collectionId={collectionId}
           status={status}
           extension=".glb"
           render={(url) => (
@@ -504,6 +510,7 @@ function MainPane({
         <ArtifactTab
           token={token}
           urn={urn}
+          collectionId={collectionId}
           status={status}
           extension=".usdz"
           render={(url) => (
@@ -516,7 +523,7 @@ function MainPane({
           )}
         />
       )}
-      {tab === "logs" && <LogsTab token={token} urn={urn} status={status} />}
+      {tab === "logs" && <LogsTab token={token} urn={urn} collectionId={collectionId} status={status} />}
     </main>
   );
 }

@@ -14,22 +14,26 @@ import Foundation
 struct ConversionEndpointTests {
     private let api = ConversionAPI()
     private let base = ConversionServiceConstants.baseURL.absoluteString
+    private let collectionId = "b.project-1"
 
     @Test func encodesTheColonsInALineageURN() {
         let urn = "urn:adsk.wipprod:dm.lineage:pTMcMOe6QIygw-QOgYbxRw"
-        let expected = base + "/api/exchanges/urn%3Aadsk.wipprod%3Adm.lineage%3ApTMcMOe6QIygw-QOgYbxRw"
-        #expect(api.endpoint(urn: urn).absoluteString == expected)
+        let expected = base + "/api/exchanges/b.project-1/urn%3Aadsk.wipprod%3Adm.lineage%3ApTMcMOe6QIygw-QOgYbxRw"
+        #expect(api.endpoint(urn: urn, collectionId: collectionId).absoluteString == expected)
     }
 
     @Test func encodesReservedCharactersThatWouldSplitThePath() {
-        let prefix = base + "/api/exchanges/"
-        let url = api.endpoint(urn: "urn:adsk:a/b+c=d?e#f")
-        #expect(url.absoluteString.hasPrefix(prefix))
-
-        let segment = url.absoluteString.dropFirst(prefix.count)
+        let url = api.endpoint(urn: "urn:adsk:a/b+c=d?e#f", collectionId: collectionId)
+        let segment = url.lastPathComponent
         for reserved in ["/", "+", "=", "?", "#"] {
             #expect(!segment.contains(reserved), "\(reserved) reached the URL unencoded")
         }
+    }
+
+    @Test func encodesReservedCharactersInTheCollectionId() {
+        let url = api.endpoint(urn: "plain-urn", collectionId: "project&region=US")
+        #expect(url.pathComponents[url.pathComponents.count - 2] == "project&region=US")
+        #expect(url.absoluteString.hasSuffix("/project%26region%3DUS/plain-urn"))
     }
 
     /// The service has to receive the URN it was given, character for character.
@@ -40,22 +44,22 @@ struct ConversionEndpointTests {
         "plain-urn",
     ])
     func decodesBackToTheOriginalURN(urn: String) {
-        let expected = "/api/exchanges/" + urn
-        #expect(api.endpoint(urn: urn).path(percentEncoded: false) == expected)
+        let expected = "/api/exchanges/" + collectionId + "/" + urn
+        #expect(api.endpoint(urn: urn, collectionId: collectionId).path(percentEncoded: false) == expected)
     }
 
     /// `appendingPathComponent` treats '%' as a character needing escaping, so layering it on an
     /// already-encoded segment turns `%3A` into `%253A` and the URN arrives corrupted.
     @Test func doesNotDoubleEncode() {
-        let url = api.endpoint(urn: "urn:adsk.wipprod:dm.lineage:abc")
+        let url = api.endpoint(urn: "urn:adsk.wipprod:dm.lineage:abc", collectionId: collectionId)
         #expect(!url.absoluteString.contains("%25"))
     }
 
     @Test func appendsTheArtifactFileNameAsItsOwnPathComponent() {
         let urn = "urn:adsk.wipprod:dm.lineage:abc"
-        let url = api.artifactEndpoint(urn: urn, fileName: "log.txt")
-        let expectedURL = api.endpoint(urn: urn).absoluteString + "/log.txt"
-        let expectedPath = "/api/exchanges/" + urn + "/log.txt"
+        let url = api.artifactEndpoint(urn: urn, collectionId: collectionId, fileName: "log.txt")
+        let expectedURL = base + "/api/exchanges/b.project-1/urn%3Aadsk.wipprod%3Adm.lineage%3Aabc/log.txt"
+        let expectedPath = "/api/exchanges/" + collectionId + "/" + urn + "/log.txt"
         #expect(url.absoluteString == expectedURL)
         #expect(url.lastPathComponent == "log.txt")
         #expect(url.path(percentEncoded: false) == expectedPath)

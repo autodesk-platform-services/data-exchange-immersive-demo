@@ -11,16 +11,19 @@ struct ConversionAPI {
 
     // Not private: percent-encoding a URN into a path is subtle enough that
     // `ConversionEndpointTests` checks it directly.
-    func artifactEndpoint(urn: String, fileName: String) -> URL {
-        endpoint(urn: urn).appendingPathComponent(fileName)
+    func artifactEndpoint(urn: String, collectionId: String, fileName: String) -> URL {
+        endpoint(urn: urn, collectionId: collectionId).appendingPathComponent(fileName)
     }
 
-    func endpoint(urn: String) -> URL {
+    func endpoint(urn: String, collectionId: String) -> URL {
         // `appendingPathComponent` would double-encode an already percent-encoded segment
         // (it treats '%' itself as a character needing escaping), so the URL is built from
         // a raw string instead of layering `appendingPathComponent` on top of `encoded`.
         let encoded = urn.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowed) ?? urn
-        let urlString = ConversionServiceConstants.baseURL.absoluteString + "/api/exchanges/" + encoded
+        let encodedCollectionId = collectionId.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowed) ?? collectionId
+        let urlString = ConversionServiceConstants.baseURL.absoluteString
+            + "/api/exchanges/" + encodedCollectionId
+            + "/" + encoded
         return URL(string: urlString)!
     }
 
@@ -34,8 +37,8 @@ struct ConversionAPI {
         }
     }
 
-    func status(urn: String, token: String) async throws -> ConversionMetadata? {
-        var request = URLRequest(url: endpoint(urn: urn))
+    func status(urn: String, collectionId: String, token: String) async throws -> ConversionMetadata? {
+        var request = URLRequest(url: endpoint(urn: urn, collectionId: collectionId))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
         let http = response as? HTTPURLResponse
@@ -46,8 +49,8 @@ struct ConversionAPI {
         }
     }
 
-    func start(urn: String, token: String) async throws {
-        var request = URLRequest(url: endpoint(urn: urn))
+    func start(urn: String, collectionId: String, token: String) async throws {
+        var request = URLRequest(url: endpoint(urn: urn, collectionId: collectionId))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -59,8 +62,8 @@ struct ConversionAPI {
         }
     }
 
-    func delete(urn: String, token: String) async throws {
-        var request = URLRequest(url: endpoint(urn: urn))
+    func delete(urn: String, collectionId: String, token: String) async throws {
+        var request = URLRequest(url: endpoint(urn: urn, collectionId: collectionId))
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -90,11 +93,12 @@ struct ConversionAPI {
     /// declared one. It is called on `URLSession`'s delegate queue rather than the main actor.
     func downloadArtifact(
         urn: String,
+        collectionId: String,
         fileName: String,
         token: String,
         onProgress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }
     ) async throws -> URL {
-        var request = URLRequest(url: artifactEndpoint(urn: urn, fileName: fileName))
+        var request = URLRequest(url: artifactEndpoint(urn: urn, collectionId: collectionId, fileName: fileName))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         // Held in a local so the delegate outlives the call regardless of how strongly
         // `URLSessionTask` happens to reference it.
@@ -115,11 +119,12 @@ struct ConversionAPI {
     /// than refetched in full on every poll. Returns nil when the artifact does not exist.
     func artifactChunk(
         urn: String,
+        collectionId: String,
         fileName: String,
         token: String,
         from offset: Int
     ) async throws -> ArtifactChunk? {
-        var request = URLRequest(url: artifactEndpoint(urn: urn, fileName: fileName))
+        var request = URLRequest(url: artifactEndpoint(urn: urn, collectionId: collectionId, fileName: fileName))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if offset > 0 {
             request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")

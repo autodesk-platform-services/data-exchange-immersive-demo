@@ -84,7 +84,7 @@ struct DataExchangeAPI {
         /// Takes a folder's exchanges and queues the folder for subfolder discovery.
         func absorb(_ folder: RawFolder) {
             for raw in folder.exchanges?.results ?? [] {
-                if let exchange = raw.exchange {
+                if let exchange = raw.exchange(in: projectId) {
                     listing.exchanges.append(exchange)
                 }
             }
@@ -204,11 +204,12 @@ private struct RawExchange: Decodable {
 
     /// Nil for an exchange with no file URN: nothing can be converted or previewed without one,
     /// so listing it would only offer a row that fails when tapped.
-    var exchange: Exchange? {
+    func exchange(in collectionId: String) -> Exchange? {
         guard let fileUrn = alternativeIdentifiers?.fileUrn, !fileUrn.isEmpty else { return nil }
         return Exchange(
             id: id,
             name: name,
+            collectionId: collectionId,
             fileUrn: fileUrn,
             fileVersionUrn: alternativeIdentifiers?.fileVersionUrn ?? ""
         )

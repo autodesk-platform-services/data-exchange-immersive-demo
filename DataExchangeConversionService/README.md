@@ -1,6 +1,6 @@
 # Data Exchange Conversion Service
 
-Simple ASP.NET application extracting geometry data from [Data Exchanges](https://aps.autodesk.com/data-exchange-cover-page) using the [Public Beta SDK](https://aps.autodesk.com/en/docs/dx-sdk-beta/v1/changelog/v1changelog/).
+Simple ASP.NET application extracting geometry data from [Data Exchanges](https://aps.autodesk.com/data-exchange-cover-page) using the [Data Exchange .NET SDK v8](https://aps.autodesk.com/en/docs/dx-sdk/v8.0.0/developers_guide/overview/).
 
 ## Live demo
 
@@ -12,13 +12,14 @@ The application is deployed to an Azure Web App. Here's how you can try it out:
 ### Extracting geometry from an exchange
 
 ```curl
-POST https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{DataExchangeUrn}}
+POST https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{collectionId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{DataExchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
+| `{{exchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
+| `{{collectionId}}` | URL-encoded Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
 The endpoint will return `202 Accepted` to indicate that the conversion has started in the background.
@@ -26,13 +27,14 @@ The endpoint will return `202 Accepted` to indicate that the conversion has star
 ### Checking status of an extraction
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{DataExchangeUrn}}
+GET https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{collectionId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{DataExchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
+| `{{exchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
+| `{{collectionId}}` | URL-encoded Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
 The endpoint will return JSON object with extraction metadata:
@@ -57,13 +59,14 @@ The endpoint returns `404 Not Found` when there is no conversion for the exchang
 ### Fetching an extraction artifact
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{DataExchangeUrn}}/{{ArtifactFileName}}
+GET https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{collectionId}}/{{exchangeUrn}}/{{ArtifactFileName}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{DataExchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
+| `{{exchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
+| `{{collectionId}}` | URL-encoded Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{{ArtifactFileName}}` | Name of the artifact file to fetch | `foo.obj` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
@@ -74,13 +77,14 @@ The endpoint will return the raw bytes of the requested artifact file, with the 
 > Note: this will only remove the extracted geometry, not the data exchange itself.
 
 ```curl
-DELETE https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{DataExchangeUrn}}
+DELETE https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{collectionId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{DataExchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
+| `{{exchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
+| `{{collectionId}}` | URL-encoded Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
 ## Running locally
@@ -88,14 +92,12 @@ Authorization: Bearer {{AccessToken}}
 ### Prerequisites
 
 - Visual Studio with the _ASP.NET and web development_ workload and _.NET 10_ installed
-- Data Exchange SDK 7.5.0 Public Beta (available on our [Feedback Portal](https://feedback.autodesk.com/project/version/item.html?cap=40e7f0adab3a46b0819aae2fc4f7a25f&artid=366cffebe97842a8893bd2cedbb39788))
+- Data Exchange SDK 8.0.0
 - Existing data exchange in [Autodesk Forma](https://acc.autodesk.com)
 
 ### Steps
 
-- Download the following NuGet packages from the feedback portal, and place them in a `packages` subfolder in the repository (next to the *.slnx file):
-  - `Autodesk.DataExchange.7.5.0-beta.nupkg`
-  - `Autodesk.DataExchange.GeometryDefinitions.0.9.3.nupkg`
+- Restore the NuGet packages referenced by the project. The Data Exchange SDK is available from the configured package sources.
 - Build and run the solution
 - Try the endpoints listed in the [Live demo](#live-demo) section against https://localhost:7008
 

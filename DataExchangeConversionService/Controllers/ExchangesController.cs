@@ -6,7 +6,7 @@ using DataExchangeConversionService.Services;
 namespace DataExchangeConversionService.Controllers;
 
 [ApiController]
-[Route("api/exchanges")]
+[Route("api/exchanges/{collectionId}")]
 public sealed class ExchangesController : ControllerBase
 {
     private readonly ConversionService _conversionService;
@@ -20,9 +20,9 @@ public sealed class ExchangesController : ControllerBase
     // produced from a version the exchange has since moved past is reported as 404, the same as
     // no conversion at all — see ConversionService.GetStatus.
     [HttpGet("{exchangeUrn}")]
-    public async Task<IActionResult> GetStatus(string exchangeUrn)
+    public async Task<IActionResult> GetStatus(string collectionId, string exchangeUrn)
     {
-        var (denied, exchange) = await ResolveExchangeAsync(exchangeUrn);
+        var (denied, exchange) = await ResolveExchangeAsync(collectionId, exchangeUrn);
         if (denied is not null) { return denied; }
 
         var status = _conversionService.GetStatus(exchange);
@@ -31,9 +31,9 @@ public sealed class ExchangesController : ControllerBase
 
     // Starts a new OBJ conversion and returns immediately while it runs in the background.
     [HttpPost("{exchangeUrn}")]
-    public async Task<IActionResult> StartConversion(string exchangeUrn)
+    public async Task<IActionResult> StartConversion(string collectionId, string exchangeUrn)
     {
-        var (denied, exchange) = await ResolveExchangeAsync(exchangeUrn);
+        var (denied, exchange) = await ResolveExchangeAsync(collectionId, exchangeUrn);
         if (denied is not null) { return denied; }
 
         TryGetBearerToken(out var bearerToken);
@@ -46,16 +46,16 @@ public sealed class ExchangesController : ControllerBase
                 Status = StatusCodes.Status409Conflict
             });
         }
-        _conversionService.StartObjConversion(exchange, bearerToken);
+        _conversionService.StartObjConversion(collectionId, exchange, bearerToken);
 
-        return Accepted($"/api/exchanges/{exchangeUrn}");
+        return Accepted($"/api/exchanges/{Uri.EscapeDataString(collectionId)}/{Uri.EscapeDataString(exchangeUrn)}");
     }
 
     // Deletes the conversion results for an exchange. This does not affect the exchange itself or its contents on the Data Exchange service.
     [HttpDelete("{exchangeUrn}")]
-    public async Task<IActionResult> DeleteConversion(string exchangeUrn)
+    public async Task<IActionResult> DeleteConversion(string collectionId, string exchangeUrn)
     {
-        var (denied, _) = await ResolveExchangeAsync(exchangeUrn);
+        var (denied, _) = await ResolveExchangeAsync(collectionId, exchangeUrn);
         if (denied is not null) { return denied; }
 
         _conversionService.DeleteObjConversion(exchangeUrn);
@@ -65,9 +65,9 @@ public sealed class ExchangesController : ControllerBase
     // Returns a single artifact produced by a conversion (e.g. the generated OBJ file).
     [HttpGet("{exchangeUrn}/{artifact}")]
     [Produces("model/obj", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
-    public async Task<IActionResult> GetArtifact(string exchangeUrn, string artifact)
+    public async Task<IActionResult> GetArtifact(string collectionId, string exchangeUrn, string artifact)
     {
-        var (denied, exchange) = await ResolveExchangeAsync(exchangeUrn);
+        var (denied, exchange) = await ResolveExchangeAsync(collectionId, exchangeUrn);
         if (denied is not null) { return denied; }
 
         var file = _conversionService.GetArtifact(exchange, artifact);
@@ -82,7 +82,9 @@ public sealed class ExchangesController : ControllerBase
     // exchange's current version along the way — the same Data Exchange call answers both, so this
     // costs no extra round trip. Returns the error result to send when access is refused, in which
     // case the accompanying identity carries no version and must not be used.
-    private async Task<(IActionResult? Denied, ExchangeIdentity Exchange)> ResolveExchangeAsync(string exchangeUrn)
+    private async Task<(IActionResult? Denied, ExchangeIdentity Exchange)> ResolveExchangeAsync(
+        string collectionId,
+        string exchangeUrn)
     {
         var unresolved = new ExchangeIdentity(exchangeUrn, null);
 
@@ -95,7 +97,7 @@ public sealed class ExchangesController : ControllerBase
             }), unresolved);
         }
 
-        var exchange = await _conversionService.ResolveExchangeAsync(exchangeUrn, bearerToken);
+        var exchange = await _conversionService.ResolveExchangeAsync(collectionId, exchangeUrn, bearerToken);
         if (exchange is null)
         {
             return (StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails

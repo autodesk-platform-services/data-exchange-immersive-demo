@@ -1,6 +1,7 @@
 ﻿using DataExchangeConversionService.Models;
 using DataExchangeConversionService.Options;
 using Autodesk.DataExchange;
+using Autodesk.DataExchange.Core.Models;
 using Microsoft.Extensions.Options;
 using System.Runtime;
 using System.Security.Cryptography;
@@ -33,17 +34,36 @@ public sealed class ConversionService
     // exchange details call only succeeds for tokens that have access, and it also reports the
     // exchange's current version — which is what decides whether a stored conversion is still a
     // conversion of what the exchange contains now.
-    public async Task<ExchangeIdentity?> ResolveExchangeAsync(string exchangeUrn, string bearerToken)
+    public async Task<ExchangeIdentity?> ResolveExchangeAsync(
+        string collectionId,
+        string exchangeUrn,
+        string bearerToken)
     {
         try
         {
-            var details = await CreateClient(bearerToken).GetExchangeDetailsAsync(exchangeUrn);
+            var detailsResponse = await CreateClient(bearerToken).GetExchangeDetailsAsync(collectionId, exchangeUrn);
+            if (!detailsResponse.IsSuccess)
+            {
+                _logger.LogWarning(
+                    "Data Exchange SDK could not resolve exchange {ExchangeUrn} in collection {CollectionId}: {Errors}",
+                    exchangeUrn,
+                    collectionId,
+                    string.Join("; ", detailsResponse.Errors));
+                return null;
+            }
+
+            var details = detailsResponse.Value;
             return string.IsNullOrWhiteSpace(details.ExchangeID)
                 ? null
                 : new ExchangeIdentity(exchangeUrn, details.FileVersionUrn);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(
+                ex,
+                "Data Exchange SDK failed to resolve exchange {ExchangeUrn} in collection {CollectionId}.",
+                exchangeUrn,
+                collectionId);
             return null;
         }
     }
@@ -63,7 +83,7 @@ public sealed class ConversionService
         return IsCurrent(metadata, exchange) ? metadata : null;
     }
 
-    public void StartObjConversion(ExchangeIdentity exchange, string bearerToken)
+    public void StartObjConversion(string collectionId, ExchangeIdentity exchange, string bearerToken)
     {
         var outputFolder = GetExchangeOutputFolder(exchange.ExchangeUrn);
         if (Directory.Exists(outputFolder))
@@ -94,7 +114,7 @@ public sealed class ConversionService
             FileVersionUrn = exchange.FileVersionUrn
         };
         WriteMetadata(outputFolder, metadata);
-        _ = Task.Run(() => RunObjConversionAsync(exchange.ExchangeUrn, bearerToken, outputFolder, metadata));
+        _ = Task.Run(() => RunObjConversionAsync(collectionId, exchange.ExchangeUrn, bearerToken, outputFolder, metadata));
     }
 
     public void DeleteObjConversion(string exchangeUrn)
@@ -132,6 +152,7 @@ public sealed class ConversionService
     }
 
     private async Task RunObjConversionAsync(
+        string collectionId,
         string exchangeUrn,
         string bearerToken,
         string outputFolder,
@@ -163,7 +184,14 @@ public sealed class ConversionService
             var client = CreateClient(bearerToken);
 
             Step("fetching exchange details");
-            var details = await client.GetExchangeDetailsAsync(exchangeUrn);
+            var detailsResponse = await client.GetExchangeDetailsAsync(collectionId, exchangeUrn);
+            if (!detailsResponse.IsSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"The Data Exchange SDK could not fetch exchange details: {string.Join("; ", detailsResponse.Errors)}");
+            }
+
+            var details = detailsResponse.Value;
             // The version the artifacts are actually produced from, which is what a later status
             // check compares against. Read again here rather than trusted from the request, in
             // case a new version was published between the two.
@@ -173,13 +201,23 @@ public sealed class ConversionService
             }
 
             Step("downloading exchange as OBJ");
-            var response = client.DownloadCompleteExchangeAsOBJ(
-                details.ExchangeID,
-                details.CollectionID,
+            var downloadResponse = client.DownloadCompleteExchangeAsOBJ(
+                new DataExchangeIdentifier
+                {
+                    ExchangeId = details.ExchangeID,
+                    CollectionId = details.CollectionID,
+                    HubId = details.HubId,
+                },
                 outputFolder,
                 CancellationToken.None);
 
-            var tempFolder = response.Value;
+            if (!downloadResponse.IsSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"The Data Exchange SDK could not download the exchange as OBJ: {string.Join("; ", downloadResponse.Errors)}");
+            }
+
+            var tempFolder = downloadResponse.Value;
             Log("Data Exchange extraction completed.");
 
             foreach (var sourcePath in Directory.GetFiles(tempFolder))

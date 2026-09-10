@@ -18,6 +18,9 @@ struct Project: Identifiable, Decodable, Hashable {
 struct Exchange: Identifiable, Decodable, Hashable {
     let id: String
     let name: String
+    /// Data Exchange collection ID. For ACC exchanges this is the project ID supplied to the
+    /// GraphQL listing query; SDK v8 requires it together with the exchange URN.
+    let collectionId: String
     /// Lineage URN — the exchange's version-independent identity.
     let fileUrn: String
     /// URN of the specific published version this listing describes. Empty when the API reported
@@ -25,8 +28,8 @@ struct Exchange: Identifiable, Decodable, Hashable {
     let fileVersionUrn: String
 
     /// What the conversion service is asked about. Version-agnostic on purpose: the service
-    /// resolves the exchange through the Data Exchange SDK, which only accepts a `dm.lineage`
-    /// URN, so a version URN cannot be substituted here. The service compares the version it
+    /// resolves the exchange through the Data Exchange SDK using the collection ID and a
+    /// `dm.lineage` URN, so a version URN cannot be substituted here. The service compares the version it
     /// converted against the exchange's current one and reports a conversion made from an older
     /// version as absent.
     var exchangeUrn: String { fileUrn }

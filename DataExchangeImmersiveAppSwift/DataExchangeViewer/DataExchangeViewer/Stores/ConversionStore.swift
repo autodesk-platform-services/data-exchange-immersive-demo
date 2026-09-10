@@ -102,7 +102,11 @@ final class ConversionStore {
         }
         do {
             let token = try await auth.validAccessToken()
-            if let metadata = try await api.status(urn: exchange.exchangeUrn, token: token) {
+            if let metadata = try await api.status(
+                urn: exchange.exchangeUrn,
+                collectionId: exchange.collectionId,
+                token: token
+            ) {
                 switch metadata.status {
                 case .completed:
                     await downloadArtifact(metadata: metadata, auth: auth)
@@ -126,7 +130,7 @@ final class ConversionStore {
         logText = ""
         do {
             let token = try await auth.validAccessToken()
-            try await api.start(urn: exchange.exchangeUrn, token: token)
+            try await api.start(urn: exchange.exchangeUrn, collectionId: exchange.collectionId, token: token)
         } catch ConversionError.conflict {
             // another client already started a conversion; fall through to polling its progress
         } catch {
@@ -148,7 +152,7 @@ final class ConversionStore {
     func clear(auth: AuthManager) async {
         do {
             let token = try await auth.validAccessToken()
-            try await api.delete(urn: exchange.exchangeUrn, token: token)
+            try await api.delete(urn: exchange.exchangeUrn, collectionId: exchange.collectionId, token: token)
             cache.delete(for: exchange.cacheKeyUrn)
             cachedUSDzURL = nil
             logData = Data()
@@ -198,7 +202,11 @@ final class ConversionStore {
     private func pollStatusOnce(auth: AuthManager, deadline: Date) async -> Bool {
         do {
             let token = try await auth.validAccessToken()
-            guard let metadata = try await api.status(urn: exchange.exchangeUrn, token: token) else {
+            guard let metadata = try await api.status(
+                urn: exchange.exchangeUrn,
+                collectionId: exchange.collectionId,
+                token: token
+            ) else {
                 // The service no longer has a conversion for this exchange: another client
                 // deleted it, or a new version of the exchange was published and superseded it.
                 // Either way there is nothing left to wait for, and polling to the deadline
@@ -248,6 +256,7 @@ final class ConversionStore {
             // download nor form a cycle — the store never holds the delegate.
             let downloaded = try await api.downloadArtifact(
                 urn: exchange.exchangeUrn,
+                collectionId: exchange.collectionId,
                 fileName: fileName,
                 token: token
             ) { [store = self] received, total in
@@ -332,6 +341,7 @@ final class ConversionStore {
         if let token = try? await auth.validAccessToken() {
             let chunk = try? await api.artifactChunk(
                 urn: exchange.exchangeUrn,
+                collectionId: exchange.collectionId,
                 fileName: "log.txt",
                 token: token,
                 from: logData.count

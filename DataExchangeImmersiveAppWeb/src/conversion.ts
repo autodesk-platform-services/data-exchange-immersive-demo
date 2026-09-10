@@ -17,13 +17,13 @@ export interface ConversionStatus {
 }
 
 // The exchange URN contains characters (':', '/', etc.) that must be escaped to fit in a path segment.
-function exchangeEndpoint(urn: string): string {
-  return `${BASE_URL}/api/exchanges/${encodeURIComponent(urn)}`;
+function exchangeEndpoint(urn: string, collectionId: string): string {
+  return `${BASE_URL}/api/exchanges/${encodeURIComponent(collectionId)}/${encodeURIComponent(urn)}`;
 }
 
 // Kicks off a conversion. The service responds 202 Accepted and runs the work in the background.
-export async function startConversion(token: string, urn: string): Promise<void> {
-  const response = await fetch(exchangeEndpoint(urn), {
+export async function startConversion(token: string, urn: string, collectionId: string): Promise<void> {
+  const response = await fetch(exchangeEndpoint(urn, collectionId), {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -33,8 +33,8 @@ export async function startConversion(token: string, urn: string): Promise<void>
 }
 
 // Deletes the results of a previous conversion so a new one can be started for this exchange.
-export async function deleteConversion(token: string, urn: string): Promise<void> {
-  const response = await fetch(exchangeEndpoint(urn), {
+export async function deleteConversion(token: string, urn: string, collectionId: string): Promise<void> {
+  const response = await fetch(exchangeEndpoint(urn, collectionId), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -44,8 +44,8 @@ export async function deleteConversion(token: string, urn: string): Promise<void
 }
 
 // Returns the current conversion status, or null if no conversion has been started for this exchange.
-export async function getStatus(token: string, urn: string): Promise<ConversionStatus | null> {
-  const response = await fetch(exchangeEndpoint(urn), { headers: { Authorization: `Bearer ${token}` } });
+export async function getStatus(token: string, urn: string, collectionId: string): Promise<ConversionStatus | null> {
+  const response = await fetch(exchangeEndpoint(urn, collectionId), { headers: { Authorization: `Bearer ${token}` } });
   if (response.status === 404) {
     return null;
   }
@@ -55,10 +55,13 @@ export async function getStatus(token: string, urn: string): Promise<ConversionS
   return (await response.json()) as ConversionStatus;
 }
 
-async function fetchArtifact(token: string, urn: string, fileName: string): Promise<Response> {
-  const response = await fetch(`${exchangeEndpoint(urn)}/${encodeURIComponent(fileName)}`, {
+async function fetchArtifact(token: string, urn: string, collectionId: string, fileName: string): Promise<Response> {
+  const response = await fetch(
+    `${exchangeEndpoint(urn, collectionId)}/${encodeURIComponent(fileName)}`,
+    {
     headers: { Authorization: `Bearer ${token}` },
-  });
+    },
+  );
   if (!response.ok) {
     throw new Error(`Failed to fetch artifact ${fileName}: ${response.status}`);
   }
@@ -71,18 +74,20 @@ async function fetchArtifact(token: string, urn: string, fileName: string): Prom
 export async function fetchArtifactBlob(
   token: string,
   urn: string,
+  collectionId: string,
   fileName: string,
 ): Promise<string> {
-  return URL.createObjectURL(await (await fetchArtifact(token, urn, fileName)).blob());
+  return URL.createObjectURL(await (await fetchArtifact(token, urn, collectionId, fileName)).blob());
 }
 
 // Downloads a text artifact (e.g. log.txt) and returns its contents as a string.
 export async function fetchArtifactText(
   token: string,
   urn: string,
+  collectionId: string,
   fileName: string,
 ): Promise<string> {
-  return (await fetchArtifact(token, urn, fileName)).text();
+  return (await fetchArtifact(token, urn, collectionId, fileName)).text();
 }
 
 // Picks the first artifact with the given extension (e.g. ".glb", ".usdz"), or undefined.

@@ -1,21 +1,30 @@
 #@DataExchangeViewingService_HostAddress = https://localhost:7008
-@DataExchangeViewingService_HostAddress = https://data-exchange-viewing-service.azurewebsites.net
-@DataExchangeUrn = urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q
+@DataExchangeViewingService_HostAddress = https://data-exchange-conversion-service.azurewebsites.net/
+@exchangeUrn = urn%3Aadsk.wipprod%3Adm.lineage%3A1-WkzyuRRv-v4ANzo1Kz1g
+@collectionId = b.12345678-abcd-1234-abcd-1234567890ab
 @AccessToken = ...
 
 ### Start exchange conversion
-POST {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{DataExchangeUrn}}
+POST {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 
 ### Get exchange conversion status
-GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{DataExchangeUrn}}
+GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 
 ### Get exchange conversion artifact
-GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{DataExchangeUrn}}/e055a5c2-3d6d-3229-bbaf-510a672ff1f1.obj
+GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}/fe8020e9-b2d3-3bac-b5c5-d0ae1d55a36a.obj
 Authorization: Bearer {{AccessToken}}
 Accept: model/obj
 
+### Get exchange conversion artifact
+GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}/b628c5eb-dfb3-3e8b-8f07-c6b4ffc554c4.glb
+Authorization: Bearer {{AccessToken}}
+
+### Get exchange conversion artifact
+GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}/b628c5eb-dfb3-3e8b-8f07-c6b4ffc554c4.usdz
+Authorization: Bearer {{AccessToken}}
+
 ### Delete exchange conversion
-DELETE {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{DataExchangeUrn}}
+DELETE {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}

@@ -12,7 +12,13 @@ import Foundation
 @Suite("USDZ cache keys")
 struct CacheKeyTests {
     private func exchange(fileUrn: String, fileVersionUrn: String) -> Exchange {
-        Exchange(id: "exchange-1", name: "Basement", fileUrn: fileUrn, fileVersionUrn: fileVersionUrn)
+        Exchange(
+            id: "exchange-1",
+            name: "Basement",
+            collectionId: "project-1",
+            fileUrn: fileUrn,
+            fileVersionUrn: fileVersionUrn
+        )
     }
 
     @Test func fileNameIsAHexDigestWithTheUSDZExtension() {
