@@ -127,7 +127,7 @@ final class ConversionStore {
                     state = .running(ConversionActivity(since: metadata.startedOrCreatedAt ?? Date()))
                     startPolling(auth: auth)
                 case .failed:
-                    state = .failed(metadata.error ?? "The conversion failed on the service.")
+                    state = .failed(metadata.error?.userFacingText ?? "The conversion failed on the service.")
                 case .superseded:
                     // The cached file was produced from the version that has just been superseded,
                     // so it would preview last week's geometry behind a "ready" badge.
@@ -256,7 +256,7 @@ final class ConversionStore {
                 await downloadArtifact(metadata: metadata, auth: auth)
                 return false
             case .failed:
-                state = .failed(metadata.error ?? "The conversion failed on the service.")
+                state = .failed(metadata.error?.userFacingText ?? "The conversion failed on the service.")
                 return false
             case .superseded:
                 // A new version was published while this conversion was running, so what it is

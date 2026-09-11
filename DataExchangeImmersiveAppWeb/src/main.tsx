@@ -515,7 +515,13 @@ function MainPane({
         <div className="conversion">
           {status && <span className={`status ${status.status}`}>{status.status}</span>}
           {status && <ConversionDuration status={status} />}
-          {status?.error && <span className="error">{status.error}</span>}
+          {/* The sentence is shown; the exception summary is a tooltip, and the stack trace is in
+              the Logs tab rather than in this header. */}
+          {status?.error && (
+            <span className="error" title={status.error.detail ?? undefined}>
+              {status.error.message}
+            </span>
+          )}
           {status && status.status !== "superseded" ? (
             <button className="secondary" onClick={() => void remove()} disabled={status.status === "running"}>
               {status.status === "running" ? "Converting…" : "Clear"}

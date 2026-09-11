@@ -309,8 +309,10 @@ public sealed class ConversionService
     {
         var logPath = Path.Combine(outputFolder, LogFileName);
 
-        // Track the step so a failure anywhere along the pipeline can be pinpointed from the
-        // logs and from the metadata written back to disk.
+        // Track the step so a failure anywhere along the pipeline can be pinpointed from the logs
+        // and from the metadata written back to disk. The identifier is what a client branches on;
+        // the description is what goes in the log next to it.
+        var currentStepId = ConversionSteps.Initializing;
         var currentStep = "initializing conversion";
 
         void Log(string message)
@@ -322,8 +324,9 @@ public sealed class ConversionService
         // Each step persists the metadata as well as logging, so UpdatedAt is a heartbeat a
         // reader can trust: a "running" job that has stopped moving it is one whose process is
         // gone. Writing metadata.json is a few hundred bytes against a step that takes seconds.
-        void Step(string description)
+        void Step(string stepId, string description)
         {
+            currentStepId = stepId;
             currentStep = description;
             Log($"Step: {description}.");
             metadata.UpdatedAt = DateTimeOffset.UtcNow;
@@ -335,10 +338,10 @@ public sealed class ConversionService
 
         try
         {
-            Step("creating Data Exchange client");
+            Step(ConversionSteps.CreatingClient, "creating Data Exchange client");
             var client = CreateClient(bearerToken);
 
-            Step("fetching exchange details");
+            Step(ConversionSteps.FetchingDetails, "fetching exchange details");
             var detailsResponse = await client.GetExchangeDetailsAsync(job.CollectionId, job.ExchangeUrn);
             if (!detailsResponse.IsSuccess)
             {
@@ -362,7 +365,7 @@ public sealed class ConversionService
                 HubId = details.HubId,
             };
 
-            Step("downloading exchange as OBJ");
+            Step(ConversionSteps.DownloadingObj, "downloading exchange as OBJ");
             var downloadResponse = client.DownloadCompleteExchangeAsOBJ(
                 exchangeIdentifier,
                 outputFolder,
@@ -381,12 +384,12 @@ public sealed class ConversionService
             {
                 var fileName = Path.GetFileName(sourcePath);
                 var destinationPath = Path.Combine(outputFolder, fileName);
-                Step($"moving extracted artifact {fileName}");
+                Step(ConversionSteps.MovingArtifacts, $"moving extracted artifact {fileName}");
                 File.Move(sourcePath, destinationPath, overwrite: true);
                 RecordArtifact(metadata, destinationPath);
             }
 
-            Step("deleting temp folder");
+            Step(ConversionSteps.DeletingTempFolder, "deleting temp folder");
             Directory.Delete(tempFolder, recursive: true);
             ForceFullGarbageCollection(_logger, "Data Exchange to OBJ conversion");
 
@@ -405,7 +408,7 @@ public sealed class ConversionService
                 // glTF viewers while streaming the OBJ.
                 var glbFileName = Path.ChangeExtension(objFileName, ".glb");
                 var glbPath = Path.Combine(outputFolder, glbFileName);
-                Step($"converting OBJ {objFileName} to GLB {glbFileName}");
+                Step(ConversionSteps.ConvertingGlb, $"converting OBJ {objFileName} to GLB {glbFileName}");
                 using (memory.Step("convert OBJ to GLB"))
                 {
                     GltfConverter.ConvertObjToGlb(objPath, glbPath, convertZUpToYUp: true, logger: _logger, logPath: logPath);
@@ -414,7 +417,7 @@ public sealed class ConversionService
                 ForceFullGarbageCollection(_logger, "OBJ to GLB conversion");
             }
 
-            Step("downloading exchange as USD");
+            Step(ConversionSteps.DownloadingUsd, "downloading exchange as USD");
             var usdDownloadResponse = client.DownloadCompleteExchangeAsUSD(
                 exchangeIdentifier,
                 outputFolder,
@@ -433,11 +436,11 @@ public sealed class ConversionService
                 ? Path.ChangeExtension(objFileNames[0], ".usdz")
                 : "exchange.usdz";
             var usdzPath = Path.Combine(outputFolder, usdzFileName);
-            Step($"bundling downloaded USD files into {usdzFileName}");
+            Step(ConversionSteps.BundlingUsdz, $"bundling downloaded USD files into {usdzFileName}");
             UsdzConverter.BundleUsdFolder(usdFolder, usdzPath, _logger, logPath);
             RecordArtifact(metadata, usdzPath);
 
-            Step("deleting USD temp folder");
+            Step(ConversionSteps.DeletingTempFolder, "deleting USD temp folder");
             Directory.Delete(usdFolder, recursive: true);
             ForceFullGarbageCollection(_logger, "USD to USDZ bundling");
 
@@ -452,9 +455,15 @@ public sealed class ConversionService
 
             metadata.Status = ConversionStatus.Failed;
             metadata.CompletedAt = DateTimeOffset.UtcNow;
-            // Persist the failing step and the full exception (type, message, stack trace,
-            // inner exceptions) so the failure is diagnosable from metadata.json alone.
-            metadata.Error = $"Failed while {currentStep}. {ex}";
+            // A sentence for a person plus the step and the exception summary. The stack trace and
+            // the inner exceptions went to the log above, which is readable in this state and is
+            // where a developer looks — they used to be sent to clients and rendered verbatim.
+            metadata.Error = new ConversionFailure
+            {
+                Step = currentStepId,
+                Message = $"The conversion failed while {currentStep}.",
+                Detail = $"{ex.GetType().Name}: {ex.Message}",
+            };
         }
 
         metadata.UpdatedAt = DateTimeOffset.UtcNow;

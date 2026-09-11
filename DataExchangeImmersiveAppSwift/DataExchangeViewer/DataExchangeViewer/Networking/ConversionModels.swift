@@ -31,10 +31,33 @@ struct ConversionArtifact: Decodable, Equatable {
     let url: String?
 }
 
+/// Why a conversion failed. Named to avoid colliding with `ConversionError`, which is this
+/// client's transport failures rather than the service's.
+///
+/// `error` used to be a single string built from the server's `exception.ToString()` — type,
+/// message, stack trace and inner exceptions — which the detail view rendered verbatim. The stack
+/// trace now stays in the conversion log.
+struct ConversionFailure: Decodable, Equatable {
+    /// One sentence, written to be shown to whoever is looking at the screen.
+    let message: String
+    /// Which step failed, as a stable identifier rather than prose.
+    let step: String?
+    /// The exception's type and message. Not its stack trace.
+    let detail: String?
+
+    /// What the app puts on screen: the sentence, plus the exception summary when there is one.
+    /// This is a developer-facing demo and "which exception" is usually the next question — but
+    /// the stack trace stays in the log, which is where it belongs.
+    var userFacingText: String {
+        guard let detail, !detail.isEmpty else { return message }
+        return "\(message)\n\n\(detail)"
+    }
+}
+
 struct ConversionMetadata: Decodable {
     let status: ConversionStatusValue
     let artifacts: [ConversionArtifact]
-    let error: String?
+    let error: ConversionFailure?
 
     /// The exchange version these artifacts were produced from.
     let fileVersionUrn: String?
