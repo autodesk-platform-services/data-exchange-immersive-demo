@@ -41,6 +41,11 @@ struct ConversionMetadata: Decodable {
     /// The version the exchange is at now. Present only when `status` is `.superseded`.
     let currentFileVersionUrn: String?
 
+    /// Presigned URL for the conversion log. The log is not an artifact, so it is named here
+    /// rather than found in `artifacts` — which is what the app used to do, by the hardcoded
+    /// name "log.txt".
+    let logUrl: String?
+
     /// When the service accepted the job.
     let createdAt: Date?
     /// When the service began converting. Null until it does.

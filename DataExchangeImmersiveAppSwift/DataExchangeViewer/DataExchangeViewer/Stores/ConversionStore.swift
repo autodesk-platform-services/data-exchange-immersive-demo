@@ -64,6 +64,11 @@ final class ConversionStore {
     /// detail-view open for an exchange that had never been converted.
     private var isLogVisible = false
 
+    /// The presigned log URL from the most recent status, when the service supplied one. The log
+    /// used to be fetched as an artifact called "log.txt" — a name the app had no business
+    /// knowing, and which stopped being in `artifacts` once the log became its own sub-resource.
+    private var logURL: String?
+
     /// Status polling starts fast, because a small conversion can finish in a few seconds, then
     /// backs off so a long BIM conversion isn't polled 100 times.
     private static let initialPollInterval: Duration = .seconds(2)
@@ -112,6 +117,7 @@ final class ConversionStore {
                 collectionId: exchange.collectionId,
                 token: token
             ) {
+                logURL = metadata.logUrl
                 switch metadata.status {
                 case .completed:
                     await downloadArtifact(metadata: metadata, auth: auth)
@@ -215,11 +221,13 @@ final class ConversionStore {
     private func pollStatusOnce(auth: AuthManager, deadline: Date) async -> Bool {
         do {
             let token = try await auth.validAccessToken()
-            guard let metadata = try await api.status(
+            let polled = try await api.status(
                 urn: exchange.exchangeUrn,
                 collectionId: exchange.collectionId,
                 token: token
-            ) else {
+            )
+            logURL = polled?.logUrl
+            guard let metadata = polled else {
                 // The service no longer has a conversion for this exchange, which now means only
                 // one thing: another client deleted it. A conversion invalidated by a newly
                 // published version arrives as `.superseded` instead of as a 404. Either way
@@ -371,10 +379,10 @@ final class ConversionStore {
     private func refreshLogOnce(auth: AuthManager) async -> LogRefresh {
         var grew = false
         if let token = try? await auth.validAccessToken() {
-            let chunk = try? await api.artifactChunk(
+            let chunk = try? await api.logChunk(
                 urn: exchange.exchangeUrn,
                 collectionId: exchange.collectionId,
-                fileName: "log.txt",
+                presignedUrl: logURL,
                 token: token,
                 from: logData.count
             )

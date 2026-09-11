@@ -39,6 +39,13 @@ public sealed class ConversionMetadata
     // publishes, not when the conversion is written.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CurrentFileVersionUrn { get; set; }
+
+    // Presigned URL for the conversion log. The log is not an artifact — it exists before the
+    // conversion produces anything and grows while it runs — but it was listed as one, which is
+    // why both clients reached for it by the hardcoded name "log.txt". Filled in per request, not
+    // persisted.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LogUrl { get; set; }
 }
 
 public static class ConversionStatus

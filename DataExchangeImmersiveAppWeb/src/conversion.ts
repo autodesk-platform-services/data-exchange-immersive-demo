@@ -36,6 +36,10 @@ export interface ConversionStatus {
   // is at now.
   fileVersionUrn?: string | null;
   currentFileVersionUrn?: string | null;
+  // Presigned URL for the conversion log. The log is not an artifact, so it is named here rather
+  // than found in `artifacts` — which is what this client used to do, by the hardcoded name
+  // "log.txt".
+  logUrl?: string | null;
   // ISO 8601, UTC, second resolution (e.g. "2026-09-10T12:04:12Z"). `updatedAt` advances at every
   // step of the pipeline, so a `running` job whose `updatedAt` has stopped moving is one whose
   // conversion process is gone.
@@ -107,27 +111,24 @@ export async function getStatus(token: string, urn: string, collectionId: string
   return (await response.json()) as ConversionStatus;
 }
 
-async function fetchArtifact(token: string, urn: string, collectionId: string, fileName: string): Promise<Response> {
-  const response = await fetch(
-    `${jobEndpoint(urn, collectionId)}/artifacts/${encodeURIComponent(fileName)}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  );
-  if (!response.ok) {
-    throw new Error(`Failed to fetch artifact ${fileName}: ${response.status}`);
-  }
-  return response;
-}
-
-// Downloads a text artifact (e.g. log.txt) and returns its contents as a string.
-export async function fetchArtifactText(
+// Downloads the conversion log. Prefers the presigned `logUrl` from the status, which needs no
+// Authorization header, and falls back to the job's log sub-resource with the bearer token for a
+// conversion produced before the service supplied one.
+export async function fetchLogText(
   token: string,
   urn: string,
   collectionId: string,
-  fileName: string,
+  status: ConversionStatus,
 ): Promise<string> {
-  return (await fetchArtifact(token, urn, collectionId, fileName)).text();
+  const response = status.logUrl
+    ? await fetch(status.logUrl)
+    : await fetch(`${jobEndpoint(urn, collectionId)}/log`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch the conversion log: ${response.status}`);
+  }
+  return response.text();
 }
 
 // Picks the first artifact of the given type (e.g. "glb", "usdz"), or undefined. Selection is by

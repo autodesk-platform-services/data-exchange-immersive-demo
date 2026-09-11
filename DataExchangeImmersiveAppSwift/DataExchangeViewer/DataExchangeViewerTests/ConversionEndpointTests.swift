@@ -89,6 +89,14 @@ struct ConversionEndpointTests {
         #expect(!url.absoluteString.contains("%"))
     }
 
+    /// The log is a sub-resource of the job, not one of its artifacts.
+    @Test func buildsTheLogEndpoint() {
+        let urn = "urn:adsk.wipprod:dm.lineage:abc"
+        let jobId = JobID.encode(collectionId: collectionId, exchangeUrn: urn)
+        #expect(api.logEndpoint(urn: urn, collectionId: collectionId).absoluteString
+            == base + "/api/jobs/" + jobId + "/log")
+    }
+
     @Test func appendsTheArtifactFileNameUnderArtifacts() {
         let urn = "urn:adsk.wipprod:dm.lineage:abc"
         let jobId = JobID.encode(collectionId: collectionId, exchangeUrn: urn)

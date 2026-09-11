@@ -73,10 +73,12 @@ The endpoint will return JSON object with extraction metadata:
   "startedAt": "2026-09-10T12:00:01Z",   // When conversion work began; null until it does
   "updatedAt": "2026-09-10T12:04:12Z",   // Bumped at every step of the pipeline
   "completedAt": "2026-09-10T12:04:12Z", // When it finished or failed; null while running
+  "logUrl": "https://.../api/jobs/{jobId}/log?secret=...",
+                          // The conversion log, readable in any state — including failed
   "artifacts": [          // Generated artifacts, described rather than just named
     {
       "name": "foo.usdz",
-      "type": "usdz",     // "obj" | "mtl" | "glb" | "usdz" | "log" | "unknown"
+      "type": "usdz",     // "obj" | "mtl" | "glb" | "usdz" | "unknown"
       "contentType": "model/vnd.usdz+zip",
       "size": 184320000,  // bytes, so a client can show real download progress
       "checksum": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
@@ -153,8 +155,30 @@ Authorization: Bearer {{AccessToken}}
 
 The endpoint will return the raw bytes of the requested artifact file, with the appropriate `Content-Type` header set. Pass `?secret=...` instead of the `Authorization` header to use a [presigned URL](#presigned-artifact-urls).
 
-The job's own bookkeeping (`metadata.json`, `secret`) is not downloadable through this endpoint,
-even though both files live in the same folder as the artifacts.
+This endpoint answers only for artifacts the conversion declared in `artifacts`. The job's own
+bookkeeping — `metadata.json`, including the exception text a failed conversion records in it, and
+the presigning `secret` next to it — lives in the same folder but is not reachable through it.
+
+### Fetching the conversion log
+
+```curl
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}/log
+Authorization: Bearer {{AccessToken}}
+```
+
+| Parameter | Description | Example |
+| --- | --- | --- |
+| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
+| `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
+
+Returns `text/plain`, inline, with range requests supported so a client can tail a growing log
+rather than refetch it whole on every poll. The status response's `logUrl` is a presigned
+equivalent that needs no `Authorization` header.
+
+The log is **not** an artifact and no longer appears in `artifacts`: it exists from the moment the
+job starts rather than when it finishes, it grows while the conversion runs, and its size and digest
+are meaningless until it stops. It is readable whatever state the job is in — including `failed` and
+`superseded`, where it is the only thing that explains what happened.
 
 ### Deleting extracted geometry
 

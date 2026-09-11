@@ -5,7 +5,7 @@ import { getExchanges, getHubs, getProjects, type Exchange, type Hub, type Proje
 import {
   conversionDuration,
   deleteConversion,
-  fetchArtifactText,
+  fetchLogText,
   findArtifact,
   getStatus,
   startConversion,
@@ -366,7 +366,7 @@ function formatBytes(bytes: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Logs tab: streams log.txt, which is readable even while a conversion runs
+// Logs tab: streams the job's log, which is readable even while a conversion runs
 // ---------------------------------------------------------------------------
 
 function LogsTab({
@@ -386,10 +386,11 @@ function LogsTab({
   // `status` is a fresh object on every poll (see MainPane), so this effect re-fetches the log
   // on the same 3s cadence as the status poll while running, and once more when it settles.
   useEffect(() => {
-    // A superseded conversion's artifacts are not served, so its log would only 404.
-    if (!status || status.status === "superseded") return;
+    // Readable in any state, including superseded and failed — where it is the only thing that
+    // explains what happened.
+    if (!status) return;
     let cancelled = false;
-    fetchArtifactText(token, urn, collectionId, "log.txt").then(
+    fetchLogText(token, urn, collectionId, status).then(
       (contents) => {
         if (!cancelled) {
           setText(contents);
@@ -405,7 +406,7 @@ function LogsTab({
     };
   }, [token, urn, collectionId, status]);
 
-  if (!status || status.status === "superseded") {
+  if (!status) {
     return <div className="tab-body placeholder">Run a conversion to view logs.</div>;
   }
   if (error && !text) {

@@ -31,13 +31,7 @@ public sealed class JobsController : ControllerBase
         var status = _conversionService.GetStatus(exchange);
         if (status is null) { return NotFound(); }
 
-        // A superseded conversion's artifacts are not served, so handing out URLs for them would
-        // only produce 404s.
-        if (ConversionService.IsUsable(status))
-        {
-            AddPresignedArtifactUrls(exchange, status);
-        }
-
+        AddPresignedUrls(exchange, status);
         return Ok(status);
     }
 
@@ -118,19 +112,55 @@ public sealed class JobsController : ControllerBase
             : PhysicalFile(file.Path, file.ContentType, enableRangeProcessing: true);
     }
 
-    // Gives every artifact an absolute URL carrying the job's secret, so a client never has to
-    // build one — and so the only place the secret appears is a response the caller had to be
-    // authorized to read.
-    private void AddPresignedArtifactUrls(ExchangeIdentity exchange, ConversionMetadata status)
+    // Gives the log — and every artifact — an absolute URL carrying the job's secret, so a client
+    // never has to build one, and the only place the secret appears is a response the caller had to
+    // be authorized to read.
+    private void AddPresignedUrls(ExchangeIdentity exchange, ConversionMetadata status)
     {
         var secret = _conversionService.GetJobSecret(exchange.Job);
         if (secret is null) { return; }
 
-        var prefix = $"{Request.Scheme}://{Request.Host}/api/jobs/{exchange.Job.Value}/artifacts/";
+        var jobUrl = $"{Request.Scheme}://{Request.Host}/api/jobs/{exchange.Job.Value}";
+        var query = $"?secret={Uri.EscapeDataString(secret)}";
+
+        // Offered whatever state the job is in: the log is most worth reading when the conversion
+        // failed or has been superseded.
+        status.LogUrl = $"{jobUrl}/log{query}";
+
+        // A superseded conversion's artifacts are not served, so URLs for them would only 404.
+        if (!ConversionService.IsUsable(status)) { return; }
+
         foreach (var artifact in status.Artifacts)
         {
-            artifact.Url = $"{prefix}{Uri.EscapeDataString(artifact.Name)}?secret={Uri.EscapeDataString(secret)}";
+            artifact.Url = $"{jobUrl}/artifacts/{Uri.EscapeDataString(artifact.Name)}{query}";
         }
+    }
+
+    // Returns the conversion log, which is readable whatever state the job is in — including
+    // failed and superseded, where it is the only thing that explains what happened.
+    //
+    // Authorized the same two ways as an artifact: the usual bearer token, or the `secret` carried
+    // by the presigned `logUrl` in a status response.
+    [HttpGet("{jobId}/log")]
+    [Produces("text/plain")]
+    public async Task<IActionResult> GetLog(string jobId, [FromQuery] string? secret)
+    {
+        if (!JobId.TryParse(jobId, out var job)) { return MalformedJobId(); }
+
+        if (!string.IsNullOrEmpty(secret))
+        {
+            if (!_conversionService.IsJobSecretValid(job, secret)) { return NotFound(); }
+        }
+        else
+        {
+            var (failure, _) = await ResolveJobAsync(jobId);
+            if (failure is not null) { return failure; }
+        }
+
+        var log = _conversionService.GetLog(job);
+        // Served inline, and with range processing, so a client can tail the growing log instead of
+        // refetching it whole on every poll.
+        return log is null ? NotFound() : StreamArtifact(log, asAttachment: false);
     }
 
     // Decodes the job ID, checks that the request carries a bearer token with access to the

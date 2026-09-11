@@ -15,10 +15,6 @@ public sealed class ConversionService
     private const string MetadataFileName = "metadata.json";
     private const string LogFileName = "log.txt";
     private const string SecretFileName = "secret";
-
-    // Files that live in a job's folder but are not artifacts. Serving either would hand a caller
-    // the job's own bookkeeping — and in the secret's case, the capability that protects it.
-    private static readonly string[] ReservedFileNames = [MetadataFileName, SecretFileName];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new Iso8601UtcConverter() }
@@ -146,8 +142,6 @@ public sealed class ConversionService
         var now = DateTimeOffset.UtcNow;
         var metadata = new ConversionMetadata
         {
-            // Described again when the conversion settles, because the log grows while it runs.
-            Artifacts = [ConversionArtifact.Describe(logPath)],
             FileVersionUrn = exchange.FileVersionUrn,
             CreatedAt = now,
             UpdatedAt = now
@@ -161,6 +155,24 @@ public sealed class ConversionService
         // Keyed on the job alone, so this removes whichever version's conversion is stored —
         // including one this service now considers superseded.
         DeleteFolderIfExists(GetJobOutputFolder(job));
+    }
+
+    // The conversion log.
+    //
+    // Not an artifact: it exists from the moment the job starts rather than when it finishes, it
+    // grows while the conversion runs, and its size and digest are meaningless until it stops. It
+    // was nonetheless listed in `artifacts`, which is why both clients reached for it by the
+    // hardcoded name "log.txt".
+    //
+    // Readable whatever state the job is in, including failed and superseded. It is the one file
+    // worth reading when a conversion has gone wrong, and gating it behind "are these artifacts
+    // still current" made a superseded job's log unreachable at exactly the wrong moment.
+    public Artifact? GetLog(JobId job)
+    {
+        var logPath = Path.Combine(GetJobOutputFolder(job), LogFileName);
+        return File.Exists(logPath)
+            ? new Artifact(logPath, LogFileName, ArtifactTypes.For(LogFileName).ContentType)
+            : null;
     }
 
     // The job's presigning secret, or null when there is no job on disk.
@@ -196,41 +208,57 @@ public sealed class ConversionService
     // never receives stale bytes; only a client holding on to an old URL does.
     public Artifact? GetPresignedArtifact(JobId job, string artifactName)
     {
-        return ResolveArtifactFile(GetJobOutputFolder(job), artifactName);
+        var outputFolder = GetJobOutputFolder(job);
+        var metadata = ReadMetadata(outputFolder);
+        return metadata is null ? null : ResolveDeclaredArtifact(outputFolder, metadata, artifactName);
     }
 
     public Artifact? GetArtifact(ExchangeIdentity exchange, string artifactName)
     {
         // Gated the same way as the status, so an artifact left over from a superseded version is
         // never served — not even to a client that asks for it by name.
-        if (!IsUsable(GetStatus(exchange)))
+        var status = GetStatus(exchange);
+        if (!IsUsable(status))
         {
             return null;
         }
 
-        return ResolveArtifactFile(GetJobOutputFolder(exchange.Job), artifactName);
+        return ResolveDeclaredArtifact(GetJobOutputFolder(exchange.Job), status!, artifactName);
     }
 
-    private static Artifact? ResolveArtifactFile(string outputFolder, string artifactName)
+    // Resolves a name against the artifacts the conversion actually declared.
+    //
+    // This used to resolve any file name that happened to exist in the job's folder, which made
+    // the job's own bookkeeping downloadable: `metadata.json` — including the full exception text
+    // a failed conversion stores in it — and, once presigning arrived, the secret next to it.
+    // Answering only for declared artifacts closes that by construction rather than by remembering
+    // to add each new internal file to a denylist.
+    //
+    // The content type comes from the declaration too, so the status and the bytes cannot disagree
+    // about what a file is.
+    private static Artifact? ResolveDeclaredArtifact(
+        string outputFolder,
+        ConversionMetadata metadata,
+        string artifactName)
     {
-        // GetFileName strips any directory parts, so the lookup stays inside the output folder.
+        // GetFileName strips any directory parts, so a name cannot walk out of the output folder
+        // even before it is matched against the declarations.
         var fileName = Path.GetFileName(artifactName);
 
-        // The job's own bookkeeping is not downloadable. Without this, `metadata.json` — and the
-        // presigning secret next to it — would resolve like any other file in the folder.
-        if (ReservedFileNames.Contains(fileName, StringComparer.OrdinalIgnoreCase))
+        var declared = metadata.Artifacts.FirstOrDefault(artifact =>
+            string.Equals(artifact.Name, fileName, StringComparison.OrdinalIgnoreCase));
+        if (declared is null)
         {
             return null;
         }
 
-        var artifactPath = Path.Combine(outputFolder, fileName);
+        var artifactPath = Path.Combine(outputFolder, declared.Name);
         if (!File.Exists(artifactPath))
         {
             return null;
         }
 
-        var (_, contentType) = ArtifactTypes.For(artifactPath);
-        return new Artifact(artifactPath, Path.GetFileName(artifactPath), contentType);
+        return new Artifact(artifactPath, declared.Name, declared.ContentType);
     }
 
     private async Task RunObjConversionAsync(
@@ -389,9 +417,6 @@ public sealed class ConversionService
             metadata.Error = $"Failed while {currentStep}. {ex}";
         }
 
-        // Nothing appends to the log past this point, so its recorded size and digest now
-        // describe the finished file rather than the empty one the job started with.
-        RecordArtifact(metadata, logPath);
         metadata.UpdatedAt = DateTimeOffset.UtcNow;
         WriteMetadata(outputFolder, metadata);
     }

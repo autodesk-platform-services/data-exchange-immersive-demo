@@ -27,6 +27,10 @@ Authorization: Bearer {{AccessToken}}
 GET {{DataExchangeViewingService_HostAddress }}/api/jobs/{{jobId}}/artifacts/b628c5eb-dfb3-3e8b-8f07-c6b4ffc554c4.usdz
 Authorization: Bearer {{AccessToken}}
 
+### Get conversion job log
+GET {{DataExchangeViewingService_HostAddress }}/api/jobs/{{jobId}}/log
+Authorization: Bearer {{AccessToken}}
+
 ### Delete conversion job
 DELETE {{DataExchangeViewingService_HostAddress }}/api/jobs/{{jobId}}
 Authorization: Bearer {{AccessToken}}

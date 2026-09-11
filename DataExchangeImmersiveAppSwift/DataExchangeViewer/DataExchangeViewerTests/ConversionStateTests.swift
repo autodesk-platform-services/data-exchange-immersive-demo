@@ -35,6 +35,7 @@ struct ConversionStateTests {
             error: error,
             fileVersionUrn: nil,
             currentFileVersionUrn: nil,
+            logUrl: nil,
             createdAt: createdAt,
             startedAt: startedAt,
             updatedAt: nil,
@@ -57,14 +58,16 @@ struct ConversionStateTests {
               "checksum": "sha256:abc",
               "url": "https://example.test/api/jobs/abc/artifacts/model.usdz?secret=s3cr3t"
             },
-            { "name": "log.txt", "type": "log", "contentType": "text/plain", "size": 512, "checksum": null }
+            { "name": "model.glb", "type": "glb", "contentType": "model/gltf-binary", "size": 512, "checksum": null }
           ],
-          "error": null
+          "error": null,
+          "logUrl": "https://example.test/api/jobs/abc/log?secret=s3cr3t"
         }
         """
         let metadata = try JSONDecoder().decode(ConversionMetadata.self, from: Data(json.utf8))
         #expect(metadata.status == .completed)
-        #expect(metadata.artifacts.map(\.name) == ["model.usdz", "log.txt"])
+        #expect(metadata.artifacts.map(\.name) == ["model.usdz", "model.glb"])
+        #expect(metadata.logUrl == "https://example.test/api/jobs/abc/log?secret=s3cr3t")
         #expect(metadata.artifacts.first?.size == 184_320_000)
         #expect(metadata.artifacts.first?.contentType == "model/vnd.usdz+zip")
         #expect(metadata.artifacts.first?.checksum == "sha256:abc")
@@ -151,20 +154,20 @@ struct ConversionStateTests {
         let metadata = metadata(
             status: .completed,
             artifacts: [
-                artifact(name: "log.txt", type: "log"),
+                artifact(name: "Basement.mtl", type: "mtl"),
                 artifact(name: "Basement.obj", type: "obj"),
                 artifact(name: "Basement.usdz", type: "usdz", size: 1_024),
             ]
         )
         #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz)?.name == "Basement.usdz")
         #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz)?.size == 1_024)
-        #expect(ConversionAPI.findArtifact(metadata, type: "log")?.name == "log.txt")
+        #expect(ConversionAPI.findArtifact(metadata, type: "obj")?.name == "Basement.obj")
     }
 
     /// A conversion that reports success without producing a model is a failure the detail view
     /// has to explain, so this must not return something unusable.
     @Test func reportsNoUSDZWhenTheConversionProducedNone() {
-        let metadata = metadata(status: .completed, artifacts: [artifact(name: "log.txt", type: "log")])
+        let metadata = metadata(status: .completed, artifacts: [artifact(name: "Basement.obj", type: "obj")])
         #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz) == nil)
         #expect(ConversionAPI.findArtifact(nil, type: ArtifactType.usdz) == nil)
     }

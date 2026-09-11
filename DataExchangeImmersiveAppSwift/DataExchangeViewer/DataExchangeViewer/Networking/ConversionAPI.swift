@@ -14,6 +14,11 @@ struct ConversionAPI {
             .appendingPathComponent(fileName)
     }
 
+    /// The conversion log, which is a sub-resource of the job rather than one of its artifacts.
+    func logEndpoint(urn: String, collectionId: String) -> URL {
+        endpoint(urn: urn, collectionId: collectionId).appendingPathComponent("log")
+    }
+
     func endpoint(urn: String, collectionId: String) -> URL {
         // The job ID is base64url, whose alphabet is entirely safe in a path segment, so there is
         // no percent-encoding here to get wrong — and `appendingPathComponent` can be used on the
@@ -118,16 +123,21 @@ struct ConversionAPI {
         return fileURL
     }
 
-    /// Reads a text artifact from `offset` onwards, so a growing conversion log is tailed rather
-    /// than refetched in full on every poll. Returns nil when the artifact does not exist.
-    func artifactChunk(
+    /// Reads the conversion log from `offset` onwards, so a growing log is tailed rather than
+    /// refetched in full on every poll. Returns nil when there is no log.
+    ///
+    /// `presignedUrl` is the `logUrl` from the last status, when there was one. The bearer token is
+    /// sent either way: the service takes the presigned path whenever a secret is present and
+    /// ignores the header, so there is one request shape rather than two.
+    func logChunk(
         urn: String,
         collectionId: String,
-        fileName: String,
+        presignedUrl: String?,
         token: String,
         from offset: Int
     ) async throws -> ArtifactChunk? {
-        var request = URLRequest(url: artifactEndpoint(urn: urn, collectionId: collectionId, fileName: fileName))
+        let url = presignedUrl.flatMap(URL.init(string:)) ?? logEndpoint(urn: urn, collectionId: collectionId)
+        var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if offset > 0 {
             request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
