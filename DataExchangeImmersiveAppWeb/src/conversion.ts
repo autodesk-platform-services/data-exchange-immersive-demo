@@ -70,23 +70,19 @@ export function conversionDuration(status: ConversionStatus, now: number = Date.
   return Math.max(0, end - Date.parse(start));
 }
 
-// The service addresses a conversion job by one path segment: the base64url encoding of
-// `"{collectionId}|{exchangeUrn}"`. The job ID is derived from the pair rather than handed out by
-// the service, so it can be computed before any job exists — and because base64url uses only
-// characters that are already legal in a path, nothing here needs percent-encoding.
-export function jobId(collectionId: string, urn: string): string {
-  // `btoa` takes a string of code points below 256, so the text is encoded to UTF-8 bytes first.
-  // Collection IDs and URNs are ASCII in practice, but a stray non-ASCII character should produce
-  // a wrong-looking job ID rather than throw from inside a fetch.
-  const utf8 = new TextEncoder().encode(`${collectionId}|${urn}`);
-  return btoa(String.fromCharCode(...utf8))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+// A conversion job is addressed by the pair it was started for, spelled out as two path segments:
+// `/api/jobs/{collectionId}/{exchangeUrn}`. The pair is all the service needs, so the URL can be
+// built before any job exists — and, unlike the base64url-encoded job ID this replaced, it can be
+// read and typed by hand.
+//
+// `encodeURIComponent` escapes `:` even though a path segment may contain one, so it is put back:
+// every exchange URN has two, and the service itself hands out URLs with them unescaped.
+function pathSegment(value: string): string {
+  return encodeURIComponent(value).replace(/%3A/g, ":");
 }
 
 function jobEndpoint(urn: string, collectionId: string): string {
-  return `${BASE_URL}/api/jobs/${jobId(collectionId, urn)}`;
+  return `${BASE_URL}/api/jobs/${pathSegment(collectionId)}/${pathSegment(urn)}`;
 }
 
 // Starts a conversion, or adopts the one already running or already finished, and returns the job's

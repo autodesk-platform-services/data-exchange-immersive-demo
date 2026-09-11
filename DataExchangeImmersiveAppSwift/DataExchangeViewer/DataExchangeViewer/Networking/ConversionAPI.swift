@@ -6,25 +6,24 @@
 import Foundation
 
 struct ConversionAPI {
-    // Not private: `ConversionEndpointTests` checks the job ID that goes into the path, because
-    // the service has to read back exactly the collection and URN the app encoded.
+    // Not private: `ConversionEndpointTests` checks the paths these build, because the service has
+    // to read back exactly the collection and URN the app put in them.
+    //
+    // Sub-resources are concatenated rather than appended with `appendingPathComponent`, so every
+    // escape in the URL is one `JobPath` put there.
     func artifactEndpoint(urn: String, collectionId: String, fileName: String) -> URL {
-        endpoint(urn: urn, collectionId: collectionId)
-            .appendingPathComponent("artifacts")
-            .appendingPathComponent(fileName)
+        URL(string: endpoint(urn: urn, collectionId: collectionId).absoluteString
+            + "/artifacts/" + JobPath.escaped(fileName))!
     }
 
     /// The conversion log, which is a sub-resource of the job rather than one of its artifacts.
     func logEndpoint(urn: String, collectionId: String) -> URL {
-        endpoint(urn: urn, collectionId: collectionId).appendingPathComponent("log")
+        URL(string: endpoint(urn: urn, collectionId: collectionId).absoluteString + "/log")!
     }
 
     func endpoint(urn: String, collectionId: String) -> URL {
-        // The job ID is base64url, whose alphabet is entirely safe in a path segment, so there is
-        // no percent-encoding here to get wrong — and `appendingPathComponent` can be used on the
-        // result without the double-encoding it would cause on an already-escaped URN.
-        let jobId = JobID.encode(collectionId: collectionId, exchangeUrn: urn)
-        return URL(string: ConversionServiceConstants.baseURL.absoluteString + "/api/jobs/" + jobId)!
+        URL(string: ConversionServiceConstants.baseURL.absoluteString
+            + "/api/jobs/" + JobPath.of(collectionId: collectionId, exchangeUrn: urn))!
     }
 
     // Maps the error status codes shared by every endpoint (401/403); anything else becomes a

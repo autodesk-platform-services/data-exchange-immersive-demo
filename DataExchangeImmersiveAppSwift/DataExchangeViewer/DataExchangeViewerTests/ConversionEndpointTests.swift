@@ -7,101 +7,109 @@ import Testing
 import Foundation
 @testable import DataExchangeViewer
 
-/// The conversion service identifies a job by the base64url encoding of
-/// `"{collectionId}|{exchangeUrn}"`. Getting that wrong is a 404 — or worse, a job ID that decodes
-/// to a different exchange — with nothing in the app to explain it.
+/// The conversion service identifies a job by the collection and exchange URN in its URL:
+/// `/api/jobs/{collectionId}/{exchangeUrn}`. Getting the escaping wrong is a 404 — or worse, a URL
+/// that names a different exchange — with nothing in the app to explain it.
 @Suite("Conversion service endpoints")
 struct ConversionEndpointTests {
     private let api = ConversionAPI()
     private let base = ConversionServiceConstants.baseURL.absoluteString
     private let collectionId = "b.project-1"
 
-    // MARK: - Job IDs
-
-    /// The whole point of encoding the pair: base64url uses only characters that are already legal
-    /// in a path segment, so nothing downstream has to percent-encode it.
-    @Test(arguments: [
+    private static let urns = [
         "urn:adsk.wipprod:dm.lineage:pTMcMOe6QIygw-QOgYbxRw",
         "urn:adsk.wipprod:fs.file:vf.pTMcMOe6QIygw-QOgYbxRw?version=3",
         "urn:adsk:a/b+c=d?e#f",
         "plain-urn",
-    ])
-    func jobIdIsSafeInAPathSegment(urn: String) {
-        let jobId = JobID.encode(collectionId: collectionId, exchangeUrn: urn)
-        #expect(jobId.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+    ]
+
+    // MARK: - Job paths
+
+    /// The pair occupies exactly two segments whatever the URN contains: anything that would end
+    /// the segment, or split it into a third, is escaped.
+    @Test(arguments: urns)
+    func jobPathIsTwoSegments(urn: String) {
+        let path = JobPath.of(collectionId: collectionId, exchangeUrn: urn)
+        #expect(path.filter { $0 == "/" }.count == 1)
+        #expect(!path.contains("?"))
+        #expect(!path.contains("#"))
     }
 
-    /// What the app encodes, the service must decode back character for character.
-    @Test(arguments: [
-        "urn:adsk.wipprod:dm.lineage:pTMcMOe6QIygw-QOgYbxRw",
-        "urn:adsk.wipprod:fs.file:vf.pTMcMOe6QIygw-QOgYbxRw?version=3",
-        "urn:adsk:a/b+c=d",
-        "plain-urn",
-    ])
-    func jobIdRoundTripsTheURN(urn: String) throws {
-        let jobId = JobID.encode(collectionId: collectionId, exchangeUrn: urn)
-        let decoded = try #require(JobID.decode(jobId))
-        #expect(decoded.collectionId == collectionId)
-        #expect(decoded.exchangeUrn == urn)
+    /// What the app escapes, the service must decode back character for character.
+    @Test(arguments: urns)
+    func jobPathRoundTripsTheURN(urn: String) throws {
+        let halves = JobPath.of(collectionId: collectionId, exchangeUrn: urn)
+            .split(separator: "/", maxSplits: 1)
+            .map(String.init)
+        try #require(halves.count == 2)
+        #expect(halves[0].removingPercentEncoding == collectionId)
+        #expect(halves[1].removingPercentEncoding == urn)
     }
 
-    /// A URN may contain the base64 padding and alphabet characters itself, which is exactly the
-    /// case that broke when the URN went into the path unencoded.
-    @Test func jobIdRoundTripsACollectionIdWithReservedCharacters() throws {
-        let jobId = JobID.encode(collectionId: "project&region=US", exchangeUrn: "urn:adsk:abc")
-        let decoded = try #require(JobID.decode(jobId))
-        #expect(decoded.collectionId == "project&region=US")
-        #expect(decoded.exchangeUrn == "urn:adsk:abc")
+    /// A collection ID may contain characters that are reserved elsewhere in a URL but legal in a
+    /// path segment, and they survive the round trip either way.
+    @Test func jobPathRoundTripsACollectionIdWithReservedCharacters() throws {
+        let halves = JobPath.of(collectionId: "project&region=US", exchangeUrn: "urn:adsk:abc")
+            .split(separator: "/", maxSplits: 1)
+            .map(String.init)
+        try #require(halves.count == 2)
+        #expect(halves[0].removingPercentEncoding == "project&region=US")
+        #expect(halves[1].removingPercentEncoding == "urn:adsk:abc")
     }
 
-    /// The separator belongs to the first occurrence, so a URN containing one cannot shift the
-    /// split and silently rename the collection.
-    @Test func jobIdSplitsOnTheFirstSeparatorOnly() throws {
-        let jobId = JobID.encode(collectionId: "b.project-1", exchangeUrn: "urn:adsk:a|b")
-        let decoded = try #require(JobID.decode(jobId))
-        #expect(decoded.collectionId == "b.project-1")
-        #expect(decoded.exchangeUrn == "urn:adsk:a|b")
+    /// The point of the whole scheme: a URN a developer has in front of them appears in the URL as
+    /// it is, rather than as `urn%3Aadsk%3A...` or as a base64url job ID they have to compute.
+    @Test func leavesAnExchangeURNReadable() {
+        let urn = "urn:adsk.wipprod:dm.lineage:pTMcMOe6QIygw-QOgYbxRw"
+        #expect(JobPath.of(collectionId: collectionId, exchangeUrn: urn) == "b.project-1/" + urn)
     }
 
-    @Test(arguments: ["", "!!!not-base64!!!", "YQ"])
-    func rejectsTextThatIsNotAJobId(jobId: String) {
-        // "YQ" decodes to "a" — valid base64url, but no separator and so no exchange.
-        #expect(JobID.decode(jobId) == nil)
-    }
-
-    @Test func rejectsAJobIdWithAnEmptyHalf() {
-        #expect(JobID.decode(JobID.encode(collectionId: "", exchangeUrn: "urn:adsk:abc")) == nil)
-        #expect(JobID.decode(JobID.encode(collectionId: "b.project-1", exchangeUrn: "")) == nil)
+    /// A `/` inside a URN cannot be a `/` in the path — it would look like a third segment.
+    @Test func escapesASlashInsideTheURN() {
+        let path = JobPath.of(collectionId: collectionId, exchangeUrn: "urn:adsk:a/b")
+        #expect(path == "b.project-1/urn:adsk:a%2Fb")
     }
 
     // MARK: - URLs
 
     @Test func buildsTheJobEndpoint() {
         let urn = "urn:adsk.wipprod:dm.lineage:pTMcMOe6QIygw-QOgYbxRw"
-        let jobId = JobID.encode(collectionId: collectionId, exchangeUrn: urn)
-        #expect(api.endpoint(urn: urn, collectionId: collectionId).absoluteString == base + "/api/jobs/" + jobId)
+        #expect(api.endpoint(urn: urn, collectionId: collectionId).absoluteString
+            == base + "/api/jobs/b.project-1/" + urn)
     }
 
-    /// No `%` anywhere in the URL: there is nothing left in it that needs escaping, which is what
-    /// makes `appendingPathComponent` safe to use on the result.
-    @Test func doesNotPercentEncodeAnything() {
+    /// The `?` of a version URN would otherwise start the query string, taking the rest of the URN
+    /// with it and leaving the service looking for an exchange that does not exist.
+    @Test func escapesAQueryMarkerInTheURN() {
         let url = api.endpoint(urn: "urn:adsk.wipprod:fs.file:vf.abc?version=3", collectionId: collectionId)
-        #expect(!url.absoluteString.contains("%"))
+        #expect(url.absoluteString
+            == base + "/api/jobs/b.project-1/urn:adsk.wipprod:fs.file:vf.abc%3Fversion=3")
+        #expect(url.query == nil)
     }
 
     /// The log is a sub-resource of the job, not one of its artifacts.
     @Test func buildsTheLogEndpoint() {
         let urn = "urn:adsk.wipprod:dm.lineage:abc"
-        let jobId = JobID.encode(collectionId: collectionId, exchangeUrn: urn)
         #expect(api.logEndpoint(urn: urn, collectionId: collectionId).absoluteString
-            == base + "/api/jobs/" + jobId + "/log")
+            == base + "/api/jobs/b.project-1/" + urn + "/log")
     }
 
     @Test func appendsTheArtifactFileNameUnderArtifacts() {
         let urn = "urn:adsk.wipprod:dm.lineage:abc"
-        let jobId = JobID.encode(collectionId: collectionId, exchangeUrn: urn)
         let url = api.artifactEndpoint(urn: urn, collectionId: collectionId, fileName: "log.txt")
-        #expect(url.absoluteString == base + "/api/jobs/" + jobId + "/artifacts/log.txt")
+        #expect(url.absoluteString == base + "/api/jobs/b.project-1/" + urn + "/artifacts/log.txt")
         #expect(url.lastPathComponent == "log.txt")
+    }
+
+    /// Artifact names are derived from the exchange's contents, so they are escaped too — a name
+    /// with a space in it is not a URL as it stands.
+    @Test func escapesTheArtifactFileName() {
+        let url = api.artifactEndpoint(
+            urn: "urn:adsk.wipprod:dm.lineage:abc",
+            collectionId: collectionId,
+            fileName: "my model.usdz"
+        )
+        #expect(url.absoluteString.hasSuffix("/artifacts/my%20model.usdz"))
+        #expect(url.lastPathComponent == "my model.usdz")
     }
 }

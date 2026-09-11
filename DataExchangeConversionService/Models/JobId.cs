@@ -1,91 +1,50 @@
-using System.Diagnostics.CodeAnalysis;
-using System.Text;
-
 namespace DataExchangeConversionService.Models;
 
-// The identity of a conversion job as it travels in a URL: the collection and the exchange the
-// job was started for, packed into a single path segment.
+// The identity of a conversion job: the collection and the exchange the job was started for.
 //
-// The pair is base64url-encoded rather than spelled out as two path segments because an exchange
-// URN is made of characters that are reserved in a path — ':' always, and '/', '+' and '=' in the
-// base64 tail of a version URN. Spelling it out made every caller responsible for percent-encoding
-// it exactly right, and a caller that got it wrong got a 404 with nothing to explain it. base64url
-// output is already safe in a path segment, so no escaping is involved on either side.
+// The pair travels in the URL as two path segments — `/api/jobs/{collectionId}/{exchangeUrn}` — so
+// the two values a developer has in front of them go straight into a URL. They used to be packed
+// into one base64url-encoded segment, which meant nothing could be tested without computing the
+// encoding first.
+//
+// The `:` in an exchange URN is legal in a path segment (RFC 3986 lists it among the characters a
+// segment may contain), so in practice neither half needs escaping at all. Anything a segment
+// cannot hold is percent-encoded by the caller, and the server has decoded it again by the time it
+// reaches a route value — with one exception, which FromRoute deals with.
 public sealed record JobId(string CollectionId, string ExchangeUrn)
 {
-    // Separates the two halves inside the encoded payload. Neither an ACC collection ID
-    // ("b.<uuid>") nor a Data Exchange URN can contain it, so the split back is unambiguous.
+    // Separates the two halves in the canonical form. Neither an ACC collection ID ("b.<uuid>")
+    // nor a Data Exchange URN can contain it, so the pair cannot be spelled two different ways.
     private const char Separator = '|';
 
-    // The pair unencoded. This — not the base64url text — is what the on-disk folder name is
-    // derived from, so the layout does not depend on the details of the encoding.
+    // The pair as one string. This — not the URL form — is what the on-disk folder name is derived
+    // from, so the layout does not depend on how the pair is escaped in a URL.
     public string CanonicalForm => $"{CollectionId}{Separator}{ExchangeUrn}";
 
-    public string Value => Encode(CollectionId, ExchangeUrn);
-
-    public static string Encode(string collectionId, string exchangeUrn)
+    // The pair as the two route values that named it.
+    //
+    // `%2F` is the one escape the server leaves alone: decoding it would make it indistinguishable
+    // from a real segment boundary, so it arrives here still encoded. Undoing it here is what lets
+    // an exchange URN containing a '/' be addressed — every other escape is already gone, which is
+    // why this is a targeted replacement rather than a second full unescape.
+    public static JobId FromRoute(string collectionId, string exchangeUrn)
     {
-        var payload = Encoding.UTF8.GetBytes($"{collectionId}{Separator}{exchangeUrn}");
-        // base64url per RFC 4648 §5: the two characters that are unsafe in a path are swapped out
-        // and the '=' padding is dropped, which TryParse restores.
-        return Convert.ToBase64String(payload)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
+        return new JobId(UnescapeSlashes(collectionId), UnescapeSlashes(exchangeUrn));
     }
 
-    public static bool TryParse([NotNullWhen(true)] string? value, [NotNullWhen(true)] out JobId? job)
+    // The two path segments that address the job, escaped where a character is not legal in one.
+    public string UrlPath => $"{EscapeSegment(CollectionId)}/{EscapeSegment(ExchangeUrn)}";
+
+    private static string UnescapeSlashes(string value)
     {
-        job = null;
+        return value.Replace("%2F", "/", StringComparison.OrdinalIgnoreCase);
+    }
 
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var base64 = value.Replace('-', '+').Replace('_', '/');
-        // Base64 decodes in blocks of four characters, so the padding Encode stripped has to go
-        // back on. A remainder of one is not a length any base64 text can have.
-        base64 = (base64.Length % 4) switch
-        {
-            0 => base64,
-            2 => base64 + "==",
-            3 => base64 + "=",
-            _ => null,
-        };
-        if (base64 is null)
-        {
-            return false;
-        }
-
-        string decoded;
-        try
-        {
-            // Throws on bytes that are not valid UTF-8 rather than substituting replacement
-            // characters, so a job ID that decodes to garbage is reported as malformed instead of
-            // being turned into a lookup that quietly finds nothing.
-            decoded = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
-                .GetString(Convert.FromBase64String(base64));
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-        catch (ArgumentException)
-        {
-            // DecoderFallbackException, thrown by the strict UTF-8 decoder above.
-            return false;
-        }
-
-        // Both halves are required: a job identifies one exchange within one collection, and the
-        // Data Exchange SDK cannot resolve an exchange without both.
-        var separator = decoded.IndexOf(Separator);
-        if (separator <= 0 || separator == decoded.Length - 1)
-        {
-            return false;
-        }
-
-        job = new JobId(decoded[..separator], decoded[(separator + 1)..]);
-        return true;
+    // `:` is put back because it is legal in a path segment and appears in every exchange URN:
+    // escaping it would turn every URL the service hands out into `urn%3Aadsk%3A...`, which reads
+    // as noise in a status response a developer is looking at.
+    private static string EscapeSegment(string value)
+    {
+        return Uri.EscapeDataString(value).Replace("%3A", ":");
     }
 }

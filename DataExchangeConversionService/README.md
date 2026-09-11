@@ -2,13 +2,12 @@
 
 Simple ASP.NET application extracting geometry data from [Data Exchanges](https://aps.autodesk.com/data-exchange-cover-page) using the [Data Exchange .NET SDK v8](https://aps.autodesk.com/en/docs/dx-sdk/v8.0.0/developers_guide/overview/).
 
-## Job IDs
+## Addressing a job
 
-Every endpoint addresses a *conversion job*, identified by a single path segment: the base64url
-encoding (RFC 4648 §5 — `-` and `_` instead of `+` and `/`, no `=` padding) of
+Every endpoint addresses a *conversion job*, named by the two values the job was started for:
 
 ```
-{collectionId}|{exchangeUrn}
+/api/jobs/{collectionId}/{exchangeUrn}
 ```
 
 | Part | Description | Example |
@@ -16,15 +15,19 @@ encoding (RFC 4648 §5 — `-` and `_` instead of `+` and `/`, no `=` padding) o
 | `{collectionId}` | Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{exchangeUrn}` | URN of your exchange | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 
-```js
-const jobId = btoa(`${collectionId}|${exchangeUrn}`)
-  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-// Yi4xMjM0NTY3OC1hYmNkLTEyMzQtYWJjZC0xMjM0NTY3ODkwYWJ8dXJuOmFkc2sud2lwcHJvZDpkbS5saW5lYWdlOmxiSlJsYTRRUmhPLVhudS0xYkVnNVE
+```
+/api/jobs/b.12345678-abcd-1234-abcd-1234567890ab/urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q
 ```
 
-The job ID is derived from the pair, not handed out by the service, so a client can compute it
-before any job exists. base64url output is already safe inside a path segment, so — unlike the
-exchange URN it encodes — it needs no percent-encoding.
+The job is named by the pair rather than by an ID the service hands out, so a client can build the
+URL before any job exists — and both values go in as they come out of ACC, with no encoding step in
+between. The `:` of a URN is legal in a path segment, so in practice nothing has to be escaped. A
+URN containing `?`, `#` or `/` does need percent-encoding (`%3F`, `%23`, `%2F`); the service decodes
+those back before it looks the exchange up.
+
+> The pair used to be packed into a single base64url-encoded path segment, which meant no URL could
+> be written by hand — hence this change. Clients that build the old `/api/jobs/{jobId}` URLs no
+> longer work.
 
 ## Live demo
 
@@ -36,13 +39,14 @@ The application is deployed to an Azure Web App. Here's how you can try it out:
 ### Extracting geometry from an exchange
 
 ```curl
-POST https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}
+POST https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
+| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 | `force` | Optional query parameter. `true` discards whatever is stored and converts again | `?force=true` |
 
@@ -59,13 +63,14 @@ again over a `completed` conversion.
 ### Checking status of an extraction
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
+| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
 The endpoint will return JSON object with extraction metadata:
@@ -87,7 +92,7 @@ The endpoint will return JSON object with extraction metadata:
   "startedAt": "2026-09-10T12:00:01Z",   // When conversion work began; null until it does
   "updatedAt": "2026-09-10T12:04:12Z",   // Bumped at every step of the pipeline
   "completedAt": "2026-09-10T12:04:12Z", // When it finished or failed; null while running
-  "logUrl": "https://.../api/jobs/{jobId}/log?secret=...",
+  "logUrl": "https://.../api/jobs/{collectionId}/{exchangeUrn}/log?secret=...",
                           // The conversion log, readable in any state — including failed
   "artifacts": [          // Generated artifacts, described rather than just named
     {
@@ -96,14 +101,16 @@ The endpoint will return JSON object with extraction metadata:
       "contentType": "model/vnd.usdz+zip",
       "size": 184320000,  // bytes, so a client can show real download progress
       "checksum": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-      "url": "https://.../api/jobs/{jobId}/artifacts/foo.usdz?secret=..."
+      "url": "https://.../api/jobs/{collectionId}/{exchangeUrn}/artifacts/foo.usdz?secret=..."
                           // Presigned — needs no Authorization header
     }
   ]
 }
 ```
 
-A job ID that is not valid base64url, or that does not decode to a `{collectionId}|{exchangeUrn}` pair, is answered with `400 Bad Request` on every endpoint.
+A collection ID or exchange URN the token cannot read is answered with `403 Forbidden` on every
+endpoint, whether the exchange does not exist or the token simply has no access to it. A URL with
+the wrong number of path segments matches no endpoint at all and is answered with `404 Not Found`.
 
 Select an artifact by its `type` rather than by parsing `name` — the file names are derived from
 the exchange's contents and are not predictable.
@@ -172,13 +179,14 @@ megabyte USDZ means materialising the entire package in memory first.
 ### Fetching an extraction artifact
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}/artifacts/{{ArtifactFileName}}
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}/artifacts/{{ArtifactFileName}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
+| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{ArtifactFileName}}` | Name of the artifact file to fetch | `foo.obj` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
@@ -191,13 +199,14 @@ the presigning `secret` next to it — lives in the same folder but is not reach
 ### Fetching the conversion log
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}/log
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}/log
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
+| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
 Returns `text/plain`, inline, with range requests supported so a client can tail a growing log
@@ -214,13 +223,14 @@ are meaningless until it stops. It is readable whatever state the job is in — 
 > Note: this will only remove the extracted geometry, not the data exchange itself.
 
 ```curl
-DELETE https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}
+DELETE https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
+| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
 ## Running locally

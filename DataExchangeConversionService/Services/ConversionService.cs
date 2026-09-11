@@ -568,11 +568,11 @@ public sealed class ConversionService
         return Path.Combine(outputFolder, CreateCacheKey(job));
     }
 
-    // The job's folder name: a hex SHA-256 of the collection ID and exchange URN together. Every
-    // character is legal in a path segment on every platform, which the job ID's own base64url
-    // text also is — but the digest is a constant 64 characters, so a long URN cannot push the
-    // artifact paths towards the Windows path length limit. Derived from the unencoded pair rather
-    // than from the encoded job ID so the layout on disk does not depend on the encoding.
+    // The job's folder name: a hex SHA-256 of the collection ID and exchange URN together. An
+    // exchange URN cannot be a folder name as it stands — ':' is not legal in a Windows path — and
+    // a digest is a constant 64 characters, so a long URN cannot push the artifact paths towards
+    // the Windows path length limit either. Derived from the canonical pair rather than from the
+    // URL form, so the layout on disk does not depend on how the pair is escaped in a URL.
     private static string CreateCacheKey(JobId job)
     {
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(job.CanonicalForm)));

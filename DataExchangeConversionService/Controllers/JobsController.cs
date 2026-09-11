@@ -5,11 +5,12 @@ using DataExchangeConversionService.Services;
 
 namespace DataExchangeConversionService.Controllers;
 
-// A conversion job, addressed by the base64url-encoded (collection ID, exchange URN) pair it was
-// started for — see JobId. The pair is deterministic, so a client computes the job ID itself
-// rather than having to create a job first to learn where it lives.
+// A conversion job, addressed by the (collection ID, exchange URN) pair it was started for, spelled
+// out as two path segments — see JobId. The pair is deterministic, so a client builds the job's URL
+// itself rather than having to create a job first to learn where it lives, and a developer testing
+// the service pastes in the two values as they appear in ACC rather than encoding them first.
 [ApiController]
-[Route("api/jobs")]
+[Route("api/jobs/{collectionId}/{exchangeUrn}")]
 public sealed class JobsController : ControllerBase
 {
     private readonly ConversionService _conversionService;
@@ -22,10 +23,10 @@ public sealed class JobsController : ControllerBase
     // Returns the conversion status and the artifacts available for a job. A conversion produced
     // from a version the exchange has since moved past is reported with status "superseded" and
     // carries no artifact URLs — see ConversionService.GetStatus.
-    [HttpGet("{jobId}")]
-    public async Task<IActionResult> GetStatus(string jobId)
+    [HttpGet]
+    public async Task<IActionResult> GetStatus(string collectionId, string exchangeUrn)
     {
-        var (failure, exchange) = await ResolveJobAsync(jobId);
+        var (failure, exchange) = await ResolveJobAsync(JobId.FromRoute(collectionId, exchangeUrn));
         if (failure is not null) { return failure; }
 
         var status = _conversionService.GetStatus(exchange);
@@ -45,25 +46,28 @@ public sealed class JobsController : ControllerBase
     //
     // The 202 carries the job's current state, so a caller learns whether it is waiting on a fresh
     // conversion or can go straight to the artifacts without a second request.
-    [HttpPost("{jobId}")]
-    public async Task<IActionResult> StartConversion(string jobId, [FromQuery] bool force = false)
+    [HttpPost]
+    public async Task<IActionResult> StartConversion(
+        string collectionId,
+        string exchangeUrn,
+        [FromQuery] bool force = false)
     {
-        var (failure, exchange) = await ResolveJobAsync(jobId);
+        var (failure, exchange) = await ResolveJobAsync(JobId.FromRoute(collectionId, exchangeUrn));
         if (failure is not null) { return failure; }
 
         TryGetBearerToken(out var bearerToken);
         var status = _conversionService.StartConversion(exchange, bearerToken, force);
         AddPresignedUrls(exchange, status);
 
-        return Accepted($"/api/jobs/{exchange.Job.Value}", status);
+        return Accepted($"/api/jobs/{exchange.Job.UrlPath}", status);
     }
 
     // Deletes the conversion results for a job. This does not affect the exchange itself or its
     // contents on the Data Exchange service.
-    [HttpDelete("{jobId}")]
-    public async Task<IActionResult> DeleteConversion(string jobId)
+    [HttpDelete]
+    public async Task<IActionResult> DeleteConversion(string collectionId, string exchangeUrn)
     {
-        var (failure, exchange) = await ResolveJobAsync(jobId);
+        var (failure, exchange) = await ResolveJobAsync(JobId.FromRoute(collectionId, exchangeUrn));
         if (failure is not null) { return failure; }
 
         _conversionService.DeleteObjConversion(exchange.Job);
@@ -75,23 +79,27 @@ public sealed class JobsController : ControllerBase
     // Authorized either by the usual bearer token, or by the `secret` query parameter carried by
     // the presigned URLs in a status response — which is the only way to hand these bytes to
     // something that cannot send an Authorization header, such as a <model-viewer> `src`.
-    [HttpGet("{jobId}/artifacts/{artifact}")]
+    [HttpGet("artifacts/{artifact}")]
     [Produces("model/obj", "model/mtl", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
-    public async Task<IActionResult> GetArtifact(string jobId, string artifact, [FromQuery] string? secret)
+    public async Task<IActionResult> GetArtifact(
+        string collectionId,
+        string exchangeUrn,
+        string artifact,
+        [FromQuery] string? secret)
     {
+        var job = JobId.FromRoute(collectionId, exchangeUrn);
+
         if (!string.IsNullOrEmpty(secret))
         {
-            if (!JobId.TryParse(jobId, out var presignedJob)) { return MalformedJobId(); }
-
             // A wrong secret is a 404 rather than a 403: a caller holding an unusable URL learns
             // nothing about whether the job behind it exists.
-            if (!_conversionService.IsJobSecretValid(presignedJob, secret)) { return NotFound(); }
+            if (!_conversionService.IsJobSecretValid(job, secret)) { return NotFound(); }
 
-            var presignedFile = _conversionService.GetPresignedArtifact(presignedJob, artifact);
+            var presignedFile = _conversionService.GetPresignedArtifact(job, artifact);
             return presignedFile is null ? NotFound() : StreamArtifact(presignedFile, asAttachment: false);
         }
 
-        var (failure, exchange) = await ResolveJobAsync(jobId);
+        var (failure, exchange) = await ResolveJobAsync(job);
         if (failure is not null) { return failure; }
 
         var file = _conversionService.GetArtifact(exchange, artifact);
@@ -119,7 +127,7 @@ public sealed class JobsController : ControllerBase
         var secret = _conversionService.GetJobSecret(exchange.Job);
         if (secret is null) { return; }
 
-        var jobUrl = $"{Request.Scheme}://{Request.Host}/api/jobs/{exchange.Job.Value}";
+        var jobUrl = $"{Request.Scheme}://{Request.Host}/api/jobs/{exchange.Job.UrlPath}";
         var query = $"?secret={Uri.EscapeDataString(secret)}";
 
         // Offered whatever state the job is in: the log is most worth reading when the conversion
@@ -140,11 +148,11 @@ public sealed class JobsController : ControllerBase
     //
     // Authorized the same two ways as an artifact: the usual bearer token, or the `secret` carried
     // by the presigned `logUrl` in a status response.
-    [HttpGet("{jobId}/log")]
+    [HttpGet("log")]
     [Produces("text/plain")]
-    public async Task<IActionResult> GetLog(string jobId, [FromQuery] string? secret)
+    public async Task<IActionResult> GetLog(string collectionId, string exchangeUrn, [FromQuery] string? secret)
     {
-        if (!JobId.TryParse(jobId, out var job)) { return MalformedJobId(); }
+        var job = JobId.FromRoute(collectionId, exchangeUrn);
 
         if (!string.IsNullOrEmpty(secret))
         {
@@ -152,7 +160,7 @@ public sealed class JobsController : ControllerBase
         }
         else
         {
-            var (failure, _) = await ResolveJobAsync(jobId);
+            var (failure, _) = await ResolveJobAsync(job);
             if (failure is not null) { return failure; }
         }
 
@@ -162,18 +170,16 @@ public sealed class JobsController : ControllerBase
         return log is null ? NotFound() : StreamArtifact(log, asAttachment: false);
     }
 
-    // Decodes the job ID, checks that the request carries a bearer token with access to the
-    // exchange it names, and resolves that exchange's current version along the way — the same
-    // Data Exchange call answers both, so this costs no extra round trip. Returns the error result
-    // to send when the job cannot be resolved, in which case the accompanying identity carries no
-    // version and must not be used.
-    private async Task<(IActionResult? Failure, ExchangeIdentity Exchange)> ResolveJobAsync(string jobId)
+    // Checks that the request carries a bearer token with access to the exchange the URL names, and
+    // resolves that exchange's current version along the way — the same Data Exchange call answers
+    // both, so this costs no extra round trip. Returns the error result to send when the job cannot
+    // be resolved, in which case the accompanying identity carries no version and must not be used.
+    //
+    // A URL naming an exchange that does not exist and one naming an exchange the token cannot read
+    // are the same 403: only the exchange itself can tell the two apart, and asking it is what just
+    // failed. A missing or blank path segment never reaches here — such a URL matches no route.
+    private async Task<(IActionResult? Failure, ExchangeIdentity Exchange)> ResolveJobAsync(JobId job)
     {
-        if (!JobId.TryParse(jobId, out var job))
-        {
-            return (MalformedJobId(), new ExchangeIdentity(new JobId(string.Empty, string.Empty), null));
-        }
-
         var unresolved = new ExchangeIdentity(job, null);
 
         if (!TryGetBearerToken(out var bearerToken))
@@ -197,16 +203,6 @@ public sealed class JobsController : ControllerBase
         }
 
         return (null, exchange);
-    }
-
-    private IActionResult MalformedJobId()
-    {
-        return BadRequest(new ProblemDetails
-        {
-            Title = "Malformed job ID",
-            Detail = "A job ID is the base64url encoding of '{collectionId}|{exchangeUrn}'.",
-            Status = StatusCodes.Status400BadRequest
-        });
     }
 
     private bool TryGetBearerToken(out string bearerToken)
