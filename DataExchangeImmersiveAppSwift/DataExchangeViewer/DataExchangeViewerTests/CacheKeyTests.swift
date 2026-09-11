@@ -15,7 +15,7 @@ struct CacheKeyTests {
         Exchange(
             id: "exchange-1",
             name: "Basement",
-            collectionId: "project-1",
+            projectId: "project-1",
             fileUrn: fileUrn,
             fileVersionUrn: fileVersionUrn
         )

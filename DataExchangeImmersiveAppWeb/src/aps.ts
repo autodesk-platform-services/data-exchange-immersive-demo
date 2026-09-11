@@ -24,8 +24,9 @@ export interface Project {
 export interface Exchange {
   id: string;
   name: string;
-  // SDK v8 requires the collection (project) ID together with the exchange URN.
-  collectionId: string;
+  // ACC project ID the exchange was listed from — this, not the Data Exchange collection ID, is
+  // what addresses a conversion job. The service resolves the collection from it.
+  projectId: string;
   // Lineage (file) URN — forwarded to the conversion service and used to look the exchange up.
   fileUrn: string;
   // Specific version URN — what the APS Viewer loads via Model Derivative.
@@ -86,11 +87,11 @@ interface RawFolder {
   folders?: Results<{ exchanges?: Results<RawExchange> | null }> | null;
 }
 
-function toExchange(exchange: RawExchange, collectionId: string): Exchange {
+function toExchange(exchange: RawExchange, projectId: string): Exchange {
   return {
     id: exchange.id,
     name: exchange.name,
-    collectionId,
+    projectId,
     fileUrn: exchange.alternativeIdentifiers?.fileUrn ?? "",
     fileVersionUrn: exchange.alternativeIdentifiers?.fileVersionUrn ?? "",
   };

@@ -7,23 +7,23 @@ import Foundation
 
 struct ConversionAPI {
     // Not private: `ConversionEndpointTests` checks the paths these build, because the service has
-    // to read back exactly the collection and URN the app put in them.
+    // to read back exactly the project ID and URN the app put in them.
     //
     // Sub-resources are concatenated rather than appended with `appendingPathComponent`, so every
     // escape in the URL is one `JobPath` put there.
-    func artifactEndpoint(urn: String, collectionId: String, fileName: String) -> URL {
-        URL(string: endpoint(urn: urn, collectionId: collectionId).absoluteString
+    func artifactEndpoint(urn: String, projectId: String, fileName: String) -> URL {
+        URL(string: endpoint(urn: urn, projectId: projectId).absoluteString
             + "/artifacts/" + JobPath.escaped(fileName))!
     }
 
     /// The conversion log, which is a sub-resource of the job rather than one of its artifacts.
-    func logEndpoint(urn: String, collectionId: String) -> URL {
-        URL(string: endpoint(urn: urn, collectionId: collectionId).absoluteString + "/log")!
+    func logEndpoint(urn: String, projectId: String) -> URL {
+        URL(string: endpoint(urn: urn, projectId: projectId).absoluteString + "/log")!
     }
 
-    func endpoint(urn: String, collectionId: String) -> URL {
+    func endpoint(urn: String, projectId: String) -> URL {
         URL(string: ConversionServiceConstants.baseURL.absoluteString
-            + "/api/jobs/" + JobPath.of(collectionId: collectionId, exchangeUrn: urn))!
+            + "/api/jobs/" + JobPath.of(projectId: projectId, exchangeUrn: urn))!
     }
 
     // Maps the error status codes shared by every endpoint (401/403); anything else becomes a
@@ -36,8 +36,8 @@ struct ConversionAPI {
         }
     }
 
-    func status(urn: String, collectionId: String, token: String) async throws -> ConversionMetadata? {
-        var request = URLRequest(url: endpoint(urn: urn, collectionId: collectionId))
+    func status(urn: String, projectId: String, token: String) async throws -> ConversionMetadata? {
+        var request = URLRequest(url: endpoint(urn: urn, projectId: projectId))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
         let http = response as? HTTPURLResponse
@@ -53,8 +53,8 @@ struct ConversionAPI {
     ///
     /// The call is idempotent. Returns nil if the service answers 202 without a body, which is what
     /// an older build of the service does.
-    func start(urn: String, collectionId: String, token: String) async throws -> ConversionMetadata? {
-        var request = URLRequest(url: endpoint(urn: urn, collectionId: collectionId))
+    func start(urn: String, projectId: String, token: String) async throws -> ConversionMetadata? {
+        var request = URLRequest(url: endpoint(urn: urn, projectId: projectId))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -65,8 +65,8 @@ struct ConversionAPI {
         }
     }
 
-    func delete(urn: String, collectionId: String, token: String) async throws {
-        var request = URLRequest(url: endpoint(urn: urn, collectionId: collectionId))
+    func delete(urn: String, projectId: String, token: String) async throws {
+        var request = URLRequest(url: endpoint(urn: urn, projectId: projectId))
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -97,7 +97,7 @@ struct ConversionAPI {
     func downloadArtifact(
         artifact: ConversionArtifact,
         urn: String,
-        collectionId: String,
+        projectId: String,
         token: String,
         onProgress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }
     ) async throws -> URL {
@@ -106,7 +106,7 @@ struct ConversionAPI {
         // every artifact request just to authorize one.
         let presigned = artifact.url.flatMap(URL.init(string:))
         var request = URLRequest(
-            url: presigned ?? artifactEndpoint(urn: urn, collectionId: collectionId, fileName: artifact.name)
+            url: presigned ?? artifactEndpoint(urn: urn, projectId: projectId, fileName: artifact.name)
         )
         if presigned == nil {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -134,12 +134,12 @@ struct ConversionAPI {
     /// ignores the header, so there is one request shape rather than two.
     func logChunk(
         urn: String,
-        collectionId: String,
+        projectId: String,
         presignedUrl: String?,
         token: String,
         from offset: Int
     ) async throws -> ArtifactChunk? {
-        let url = presignedUrl.flatMap(URL.init(string:)) ?? logEndpoint(urn: urn, collectionId: collectionId)
+        let url = presignedUrl.flatMap(URL.init(string:)) ?? logEndpoint(urn: urn, projectId: projectId)
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if offset > 0 {

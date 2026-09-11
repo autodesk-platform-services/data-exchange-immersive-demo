@@ -202,12 +202,12 @@ private struct RawExchange: Decodable {
 
     /// Nil for an exchange with no file URN: nothing can be converted or previewed without one,
     /// so listing it would only offer a row that fails when tapped.
-    func exchange(in collectionId: String) -> Exchange? {
+    func exchange(in projectId: String) -> Exchange? {
         guard let fileUrn = alternativeIdentifiers?.fileUrn, !fileUrn.isEmpty else { return nil }
         return Exchange(
             id: id,
             name: name,
-            collectionId: collectionId,
+            projectId: projectId,
             fileUrn: fileUrn,
             fileVersionUrn: alternativeIdentifiers?.fileVersionUrn ?? ""
         )

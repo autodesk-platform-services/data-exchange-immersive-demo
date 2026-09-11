@@ -110,7 +110,7 @@ final class ConversionStore {
             let token = try await auth.validAccessToken()
             if let metadata = try await api.status(
                 urn: exchange.exchangeUrn,
-                collectionId: exchange.collectionId,
+                projectId: exchange.projectId,
                 token: token
             ) {
                 logURL = metadata.logUrl
@@ -149,7 +149,7 @@ final class ConversionStore {
             // already started.
             let metadata = try await api.start(
                 urn: exchange.exchangeUrn,
-                collectionId: exchange.collectionId,
+                projectId: exchange.projectId,
                 token: token
             )
             logURL = metadata?.logUrl
@@ -181,7 +181,7 @@ final class ConversionStore {
     func clear(auth: AuthManager) async {
         do {
             let token = try await auth.validAccessToken()
-            try await api.delete(urn: exchange.exchangeUrn, collectionId: exchange.collectionId, token: token)
+            try await api.delete(urn: exchange.exchangeUrn, projectId: exchange.projectId, token: token)
             cache.delete(for: exchange.cacheKeyUrn)
             cachedUSDzURL = nil
             logData = Data()
@@ -233,7 +233,7 @@ final class ConversionStore {
             let token = try await auth.validAccessToken()
             let polled = try await api.status(
                 urn: exchange.exchangeUrn,
-                collectionId: exchange.collectionId,
+                projectId: exchange.projectId,
                 token: token
             )
             logURL = polled?.logUrl
@@ -302,7 +302,7 @@ final class ConversionStore {
             let downloaded = try await api.downloadArtifact(
                 artifact: artifact,
                 urn: exchange.exchangeUrn,
-                collectionId: exchange.collectionId,
+                projectId: exchange.projectId,
                 token: token
             ) { [store = self] received, total in
                 // Delivered on URLSession's delegate queue, so this hops back to the actor that
@@ -390,7 +390,7 @@ final class ConversionStore {
         if let token = try? await auth.validAccessToken() {
             let chunk = try? await api.logChunk(
                 urn: exchange.exchangeUrn,
-                collectionId: exchange.collectionId,
+                projectId: exchange.projectId,
                 presignedUrl: logURL,
                 token: token,
                 from: logData.count

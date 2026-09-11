@@ -5,8 +5,9 @@
 
 import Foundation
 
-/// The path that addresses a conversion job on the service: `{collectionId}/{exchangeUrn}`, each
-/// half escaped where a character is not legal in a path segment.
+/// The path that addresses a conversion job on the service: `{projectId}/{exchangeUrn}`, each
+/// half escaped where a character is not legal in a path segment. The first half is the ACC
+/// project ID; the service resolves the exchange's Data Exchange collection from it.
 ///
 /// The escaping lives here because the obvious ways to do it are both wrong.
 /// `addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)` leaves `/` alone — it is a path
@@ -24,8 +25,8 @@ enum JobPath {
         return allowed
     }()
 
-    static func of(collectionId: String, exchangeUrn: String) -> String {
-        "\(escaped(collectionId))/\(escaped(exchangeUrn))"
+    static func of(projectId: String, exchangeUrn: String) -> String {
+        "\(escaped(projectId))/\(escaped(exchangeUrn))"
     }
 
     /// One escaped path segment. Also used for artifact file names, which are derived from the

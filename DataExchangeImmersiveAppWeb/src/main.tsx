@@ -371,12 +371,12 @@ function formatBytes(bytes: number): string {
 function LogsTab({
   token,
   urn,
-  collectionId,
+  projectId,
   status,
 }: {
   token: string;
   urn: string;
-  collectionId: string;
+  projectId: string;
   status: ConversionStatus | null | undefined;
 }) {
   const [text, setText] = useState<string | null>(null);
@@ -389,7 +389,7 @@ function LogsTab({
     // explains what happened.
     if (!status) return;
     let cancelled = false;
-    fetchLogText(token, urn, collectionId, status).then(
+    fetchLogText(token, urn, projectId, status).then(
       (contents) => {
         if (!cancelled) {
           setText(contents);
@@ -403,7 +403,7 @@ function LogsTab({
     return () => {
       cancelled = true;
     };
-  }, [token, urn, collectionId, status]);
+  }, [token, urn, projectId, status]);
 
   if (!status) {
     return <div className="tab-body placeholder">Run a conversion to view logs.</div>;
@@ -474,33 +474,33 @@ function MainPane({
   // The conversion/viewing service identifies an exchange by its URL-encoded lineage URN
   // (urn:adsk.wipprod:dm.lineage:...), i.e. the exchange's fileUrn — not the GraphQL exchange id.
   const urn = exchange.fileUrn;
-  const collectionId = exchange.collectionId;
+  const projectId = exchange.projectId;
 
   // As soon as an exchange is selected, check the viewing service for already-available artifacts.
   // The GLB/USDZ/logs tabs and the convert/delete button stay disabled until this first check settles.
   useEffect(() => {
     setStatus(undefined);
     setTab("viewer");
-    getStatus(token, urn, collectionId).then(setStatus, () => setStatus(null));
-  }, [token, urn, collectionId]);
+    getStatus(token, urn, projectId).then(setStatus, () => setStatus(null));
+  }, [token, urn, projectId]);
 
   // Poll while a conversion is running.
   useEffect(() => {
     if (status?.status !== "running") return;
     const timer = setInterval(() => {
-      getStatus(token, urn, collectionId).then(setStatus, () => {});
+      getStatus(token, urn, projectId).then(setStatus, () => {});
     }, 3000);
     return () => clearInterval(timer);
-  }, [token, urn, collectionId, status?.status]);
+  }, [token, urn, projectId, status?.status]);
 
   async function convert() {
     // The service answers with the job's real state rather than just "accepted", so there is no
     // need to fabricate a running status and wait for the first poll to correct it.
-    setStatus(await startConversion(token, urn, collectionId));
+    setStatus(await startConversion(token, urn, projectId));
   }
 
   async function remove() {
-    await deleteConversion(token, urn, collectionId);
+    await deleteConversion(token, urn, projectId);
     setStatus(null);
   }
 
@@ -573,7 +573,7 @@ function MainPane({
           )}
         />
       )}
-      {tab === "logs" && <LogsTab token={token} urn={urn} collectionId={collectionId} status={status} />}
+      {tab === "logs" && <LogsTab token={token} urn={urn} projectId={projectId} status={status} />}
     </main>
   );
 }

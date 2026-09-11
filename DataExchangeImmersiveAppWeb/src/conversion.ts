@@ -67,8 +67,11 @@ export function conversionDuration(status: ConversionStatus, now: number = Date.
 }
 
 // A conversion job is addressed by the pair it was started for, spelled out as two path segments:
-// `/api/jobs/{collectionId}/{exchangeUrn}`. The pair is all the service needs, so the URL can be
+// `/api/jobs/{projectId}/{exchangeUrn}`. The pair is all the service needs, so the URL can be
 // built before any job exists, and it can be read and typed by hand.
+//
+// The first segment is the ACC project ID, not the exchange's Data Exchange collection ID — the
+// service resolves the collection itself.
 //
 // `encodeURIComponent` escapes `:` even though a path segment may contain one, so it is put back:
 // every exchange URN has two, and the service itself hands out URLs with them unescaped.
@@ -76,8 +79,8 @@ function pathSegment(value: string): string {
   return encodeURIComponent(value).replace(/%3A/g, ":");
 }
 
-function jobEndpoint(urn: string, collectionId: string): string {
-  return `${BASE_URL}/api/jobs/${pathSegment(collectionId)}/${pathSegment(urn)}`;
+function jobEndpoint(urn: string, projectId: string): string {
+  return `${BASE_URL}/api/jobs/${pathSegment(projectId)}/${pathSegment(urn)}`;
 }
 
 // Starts a conversion, or adopts the one already running or already finished, and returns the job's
@@ -88,10 +91,10 @@ function jobEndpoint(urn: string, collectionId: string): string {
 export async function startConversion(
   token: string,
   urn: string,
-  collectionId: string,
+  projectId: string,
   force = false,
 ): Promise<ConversionStatus> {
-  const response = await fetch(`${jobEndpoint(urn, collectionId)}${force ? "?force=true" : ""}`, {
+  const response = await fetch(`${jobEndpoint(urn, projectId)}${force ? "?force=true" : ""}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -102,8 +105,8 @@ export async function startConversion(
 }
 
 // Deletes the results of a previous conversion so a new one can be started for this exchange.
-export async function deleteConversion(token: string, urn: string, collectionId: string): Promise<void> {
-  const response = await fetch(jobEndpoint(urn, collectionId), {
+export async function deleteConversion(token: string, urn: string, projectId: string): Promise<void> {
+  const response = await fetch(jobEndpoint(urn, projectId), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -113,8 +116,8 @@ export async function deleteConversion(token: string, urn: string, collectionId:
 }
 
 // Returns the current conversion status, or null if no conversion has been started for this exchange.
-export async function getStatus(token: string, urn: string, collectionId: string): Promise<ConversionStatus | null> {
-  const response = await fetch(jobEndpoint(urn, collectionId), { headers: { Authorization: `Bearer ${token}` } });
+export async function getStatus(token: string, urn: string, projectId: string): Promise<ConversionStatus | null> {
+  const response = await fetch(jobEndpoint(urn, projectId), { headers: { Authorization: `Bearer ${token}` } });
   if (response.status === 404) {
     return null;
   }
@@ -130,12 +133,12 @@ export async function getStatus(token: string, urn: string, collectionId: string
 export async function fetchLogText(
   token: string,
   urn: string,
-  collectionId: string,
+  projectId: string,
   status: ConversionStatus,
 ): Promise<string> {
   const response = status.logUrl
     ? await fetch(status.logUrl)
-    : await fetch(`${jobEndpoint(urn, collectionId)}/log`, {
+    : await fetch(`${jobEndpoint(urn, projectId)}/log`, {
         headers: { Authorization: `Bearer ${token}` },
       });
   if (!response.ok) {
