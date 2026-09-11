@@ -255,8 +255,4 @@ final class ClippingBoundsCache {
         get { boxes[key] }
         set { boxes[key] = newValue }
     }
-
-    func removeAll() {
-        boxes = [:]
-    }
 }
