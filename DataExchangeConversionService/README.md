@@ -1,6 +1,6 @@
 # Data Exchange Conversion Service
 
-Simple ASP.NET application extracting geometry data from [Data Exchanges](https://aps.autodesk.com/data-exchange-cover-page) using the [Data Exchange .NET SDK v8](https://aps.autodesk.com/en/docs/dx-sdk/v8.0.0/developers_guide/overview/).
+Simple ASP.NET application extracting geometry data from [Data Exchanges](https://aps.autodesk.com/data-exchange-cover-page) using the generally available [Data Exchange .NET SDK v8](https://aps.autodesk.com/en/docs/dx-sdk/v8.0.0/developers_guide/overview/).
 
 ## Addressing a job
 
@@ -233,15 +233,16 @@ Authorization: Bearer {{AccessToken}}
 ### Prerequisites
 
 - Visual Studio with the _ASP.NET and web development_ workload and _.NET 10_ installed
-- Data Exchange SDK 8.0.0
 - Existing data exchange in [Autodesk Forma](https://acc.autodesk.com)
 
 ### Steps
 
-- Restore the NuGet packages referenced by the project. The Data Exchange SDK is available from the configured package sources.
+- Restore the NuGet packages referenced by the project. The generally available Data Exchange SDK v8 is provided by the single `Autodesk.DataExchange` 8.0.0 package reference. It includes its required dependencies, so do not add peer Data Exchange package references.
 - Build and run the solution
 - Try the endpoints listed in the [Live demo](#live-demo) section against https://localhost:7008
 
 ## Deploying to Azure
+
+SDK v8 includes the native Windows dependencies required at runtime in the publish output. No additional items or build targets are needed in the project file before publishing.
 
 See [docs/deploying-to-azure.md](../docs/deploying-to-azure.md).

@@ -2,6 +2,8 @@
 
 This guide walks through deploying the [DataExchangeConversionService](../DataExchangeConversionService) ASP.NET application to an Azure Web App, and publishing updates to it from Visual Studio.
 
+The generally available Data Exchange .NET SDK v8 package includes its peer dependencies and bundles the required native Windows dependencies when the application is published. Use the project file as-is: no extra NuGet package references, native-file items, or custom publish targets are required.
+
 ## 1. Create the Azure Web App
 
 In the [Azure Portal](https://portal.azure.com), go to **Create a resource** and select **Web App**.
