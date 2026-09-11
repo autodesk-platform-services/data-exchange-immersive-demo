@@ -376,3 +376,6 @@ DerivedData/
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+# Local Claude Code instructions
+CLAUDE.local.md
