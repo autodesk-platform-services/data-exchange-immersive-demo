@@ -25,13 +25,25 @@ export interface ConversionArtifact {
   url?: string | null;
 }
 
+// Why a conversion failed. `error` used to be a single string built from the server's
+// `exception.ToString()` — type, message, stack trace and inner exceptions. The stack trace now
+// stays in the conversion log.
+export interface ConversionFailure {
+  // One sentence, written to be shown to whoever is looking at the screen.
+  message: string;
+  // Which step failed, as a stable identifier rather than prose.
+  step?: string | null;
+  // The exception's type and message. Not its stack trace.
+  detail?: string | null;
+}
+
 export interface ConversionStatus {
   // "superseded" means the conversion finished, but of a version the exchange has since moved past:
   // its artifacts are not served and a new conversion is what resolves it. Previously reported as a
   // 404, indistinguishable from an exchange nobody had ever converted.
   status: "running" | "completed" | "failed" | "superseded";
   artifacts: ConversionArtifact[];
-  error?: string | null;
+  error?: ConversionFailure | null;
   // The version the artifacts were produced from, and — when superseded — the version the exchange
   // is at now.
   fileVersionUrn?: string | null;

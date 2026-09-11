@@ -9,7 +9,7 @@ public sealed class ConversionMetadata
 
     public List<ConversionArtifact> Artifacts { get; set; } = [];
 
-    public string? Error { get; set; }
+    public ConversionFailure? Error { get; set; }
 
     // When the job was accepted. Distinct from StartedAt because the two diverge as soon as
     // conversions are queued rather than started on the spot.

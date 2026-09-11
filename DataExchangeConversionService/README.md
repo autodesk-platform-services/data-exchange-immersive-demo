@@ -73,7 +73,12 @@ The endpoint will return JSON object with extraction metadata:
 ```jsonc
 {
   "status": "completed",  // "running" | "completed" | "failed" | "superseded"
-  "error": null,          // Error message in case "status" is "failed"
+  "error": null,          // Only when "status" is "failed":
+                          // {
+                          //   "message": "The conversion failed while downloading exchange as OBJ.",
+                          //   "step": "downloadingObj",
+                          //   "detail": "InvalidOperationException: ..."
+                          // }
   "fileVersionUrn": "urn:adsk.wipprod:fs.file:vf.lbJRla4QRhO-Xnu-1bEg5Q?version=3",
                           // The exchange version these artifacts were produced from
   "currentFileVersionUrn": null,
@@ -127,6 +132,21 @@ looked identical.
 
 > A presigned artifact URL handed out before the conversion was superseded keeps working until the
 > conversion is replaced — see [Presigned artifact URLs](#presigned-artifact-urls).
+
+### Conversion failures
+
+When `status` is `failed`, `error` carries:
+
+| Field | Description |
+| --- | --- |
+| `message` | One sentence, written to be shown to whoever is looking at the screen |
+| `step` | Which step failed, as a stable identifier: `initializing`, `creatingClient`, `fetchingDetails`, `downloadingObj`, `movingArtifacts`, `deletingTempFolder`, `convertingGlb`, `downloadingUsd`, `bundlingUsdz` |
+| `detail` | The exception's type and message — **not** its stack trace |
+
+The full exception, with its stack trace and inner exceptions, goes to the
+[conversion log](#fetching-the-conversion-log), which is readable in this state. `error` used to be
+a single string built from `exception.ToString()`, which meant a server stack trace was handed to
+clients and rendered verbatim — the visionOS detail view put it straight on screen.
 
 ### Presigned artifact URLs
 

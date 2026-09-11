@@ -25,7 +25,7 @@ struct ConversionStateTests {
     private func metadata(
         status: ConversionStatusValue,
         artifacts: [ConversionArtifact] = [],
-        error: String? = nil,
+        error: ConversionFailure? = nil,
         createdAt: Date? = nil,
         startedAt: Date? = nil
     ) -> ConversionMetadata {
@@ -80,11 +80,38 @@ struct ConversionStateTests {
 
     @Test func decodesAFailedConversionWithItsMessage() throws {
         let json = """
-        { "status": "failed", "artifacts": [], "error": "Unsupported geometry" }
+        {
+          "status": "failed",
+          "artifacts": [],
+          "error": {
+            "message": "The conversion failed while downloading exchange as OBJ.",
+            "step": "downloadingObj",
+            "detail": "InvalidOperationException: the SDK could not download the exchange"
+          }
+        }
         """
-        let metadata = try JSONDecoder().decode(ConversionMetadata.self, from: Data(json.utf8))
+        let metadata = try JSONDecoder.conversionService.decode(ConversionMetadata.self, from: Data(json.utf8))
         #expect(metadata.status == .failed)
-        #expect(metadata.error == "Unsupported geometry")
+        #expect(metadata.error?.message == "The conversion failed while downloading exchange as OBJ.")
+        #expect(metadata.error?.step == "downloadingObj")
+    }
+
+    /// The sentence is what a person reads; the exception summary follows it because this is a
+    /// developer-facing demo. Neither is a stack trace, which is what used to arrive here.
+    @Test func composesTheFailureTextFromTheMessageAndDetail() {
+        let withDetail = ConversionFailure(
+            message: "The conversion failed while bundling the USD files.",
+            step: "bundlingUsdz",
+            detail: "IOException: disk full"
+        )
+        #expect(withDetail.userFacingText.contains("The conversion failed while bundling the USD files."))
+        #expect(withDetail.userFacingText.contains("IOException: disk full"))
+
+        let bare = ConversionFailure(message: "It failed.", step: nil, detail: nil)
+        #expect(bare.userFacingText == "It failed.")
+
+        let empty = ConversionFailure(message: "It failed.", step: nil, detail: "")
+        #expect(empty.userFacingText == "It failed.")
     }
 
     /// A conversion of a version the exchange has moved past. Previously a 404, indistinguishable
