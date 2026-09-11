@@ -12,7 +12,7 @@ struct TokenStore {
 
     /// Identifies the one item this store owns. Deliberately free of `kSecAttrAccessible`: in a
     /// *search* dictionary that key is a filter, so including it would stop `load` and `clear`
-    /// from finding an item written before this app set an accessibility class.
+    /// from finding the item unless its accessibility class matched exactly.
     private var baseQuery: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,

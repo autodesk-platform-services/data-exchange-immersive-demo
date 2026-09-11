@@ -68,7 +68,7 @@ enum ExplodeLayout {
     ///
     /// Parts are ordered along `axis` and laid out end to end, each one's own extent plus a gap
     /// clear of the last — so a five-storey building separates into five visibly distinct slabs
-    /// whatever their individual heights, instead of the fixed per-index spacing that leaves thin
+    /// whatever their individual heights, instead of a fixed per-index spacing, which leaves thin
     /// slabs floating in a void and thick ones still intersecting.
     ///
     /// The finished stack is re-centred on the model's rest centre, so exploding doesn't also

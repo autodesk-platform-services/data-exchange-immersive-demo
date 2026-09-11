@@ -39,10 +39,9 @@ public sealed class JobsController : ControllerBase
     // Starts a conversion and returns immediately while it runs in the background.
     //
     // Idempotent: asking for a conversion that is already running, or already finished, answers
-    // 202 with that conversion rather than 409. The state the caller wants either is being reached
-    // or has been, and the 409 it used to get only meant "DELETE first, then ask again" — which is
-    // what both clients ended up doing by hand. A failed or superseded conversion is replaced,
-    // since neither is a result worth keeping. `?force=true` replaces whatever is stored.
+    // 202 with that conversion rather than 409 — the state the caller wants either is being
+    // reached or has been. A failed or superseded conversion is replaced, since neither is a
+    // result worth keeping. `?force=true` replaces whatever is stored.
     //
     // The 202 carries the job's current state, so a caller learns whether it is waiting on a fresh
     // conversion or can go straight to the artifacts without a second request.

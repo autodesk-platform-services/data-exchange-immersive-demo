@@ -51,9 +51,8 @@ struct ConversionAPI {
     /// Starts a conversion, or adopts the one already running or already finished, and returns the
     /// job's state as the service reports it.
     ///
-    /// The call is idempotent — it used to answer 409 when a conversion existed, which meant the
-    /// only way to ask again was to DELETE first. Returns nil if the service answers 202 without a
-    /// body, which is what an older build does.
+    /// The call is idempotent. Returns nil if the service answers 202 without a body, which is what
+    /// an older build of the service does.
     func start(urn: String, collectionId: String, token: String) async throws -> ConversionMetadata? {
         var request = URLRequest(url: endpoint(urn: urn, collectionId: collectionId))
         request.httpMethod = "POST"

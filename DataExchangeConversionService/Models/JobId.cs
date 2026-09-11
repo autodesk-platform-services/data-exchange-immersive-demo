@@ -3,9 +3,7 @@ namespace DataExchangeConversionService.Models;
 // The identity of a conversion job: the collection and the exchange the job was started for.
 //
 // The pair travels in the URL as two path segments — `/api/jobs/{collectionId}/{exchangeUrn}` — so
-// the two values a developer has in front of them go straight into a URL. They used to be packed
-// into one base64url-encoded segment, which meant nothing could be tested without computing the
-// encoding first.
+// the two values a developer has in front of them go straight into a URL.
 //
 // The `:` in an exchange URN is legal in a path segment (RFC 3986 lists it among the characters a
 // segment may contain), so in practice neither half needs escaping at all. Anything a segment

@@ -111,7 +111,6 @@ struct SidebarView: View {
             if loaded.isEmpty {
                 ContentUnavailableView("No hubs found", systemImage: "building.2")
             } else if filteredHubs.isEmpty {
-                // Previously an unexplained blank list.
                 ContentUnavailableView.search(text: searchText)
             }
         }
@@ -126,7 +125,8 @@ struct SidebarView: View {
             let token = try await auth.validAccessToken()
             projectsByHub[hubID] = try await DataExchangeAPI().projects(token: token, hubId: hubID)
         } catch {
-            // Includes the token lookup, which used to fail silently and leave the row blank.
+            // Covers the token lookup too, so a rejected token surfaces instead of leaving the
+            // row blank.
             auth.signOutIfSessionExpired(error)
             hubProjectErrors[hubID] = error.userFacingDescription
         }

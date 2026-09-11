@@ -2,14 +2,8 @@ namespace DataExchangeConversionService.Models;
 
 // Why a conversion failed, in the form a client can actually use.
 //
-// This used to be one string built as `$"Failed while {currentStep}. {ex}"` — and `ex.ToString()`
-// is the exception's type, message, stack trace and every inner exception. That string was handed
-// to clients and rendered verbatim: the visionOS detail view put it straight on screen through
-// `state = .failed(...)`. A server stack trace is not a sentence for a person, and it is not
-// something to ship to a headset.
-//
-// The full exception still goes to the conversion log, which is where a developer looks and which
-// is now readable in any state — including this one.
+// The full exception goes to the conversion log, which is where a developer looks and which is
+// readable in any state — including this one.
 public sealed class ConversionFailure
 {
     // One sentence, written for whoever is looking at the screen.

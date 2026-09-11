@@ -35,8 +35,7 @@ struct Exchange: Identifiable, Decodable, Hashable {
     var exchangeUrn: String { fileUrn }
 
     /// Key for the on-device USDZ cache. Version-specific, so publishing a new version of an
-    /// exchange can no longer leave the app serving last week's geometry behind a green
-    /// "Ready to preview" badge. Falls back to the lineage URN when no version is known, which is
-    /// the previous behaviour and no worse than it was.
+    /// exchange cannot leave the app serving last week's geometry behind a green "Ready to preview"
+    /// badge. Falls back to the lineage URN when no version is known.
     var cacheKeyUrn: String { fileVersionUrn.isEmpty ? fileUrn : fileVersionUrn }
 }

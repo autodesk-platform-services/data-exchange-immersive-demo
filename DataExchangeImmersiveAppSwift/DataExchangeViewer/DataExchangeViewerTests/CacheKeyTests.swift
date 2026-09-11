@@ -54,15 +54,14 @@ struct CacheKeyTests {
         #expect(exchange.cacheKeyUrn == "urn:version:abc:3")
     }
 
-    /// The API reports no version for some exchanges. Falling back to the lineage URN is the
-    /// pre-version-keying behaviour, and no worse than it was.
+    /// The API reports no version for some exchanges, so the key falls back to the lineage URN.
     @Test func cacheKeyFallsBackToTheLineageURN() {
         let exchange = exchange(fileUrn: "urn:lineage:abc", fileVersionUrn: "")
         #expect(exchange.cacheKeyUrn == "urn:lineage:abc")
     }
 
-    /// The regression version keying fixed: publishing a new version left the app serving the
-    /// previously downloaded file behind a green "Ready to preview" badge.
+    /// Keying on the version is what stops a newly published version from being served as the
+    /// file already on disk, behind a green "Ready to preview" badge.
     @Test func twoVersionsOfOneExchangeCacheSeparately() {
         let v2 = exchange(fileUrn: "urn:lineage:abc", fileVersionUrn: "urn:version:abc:2")
         let v3 = exchange(fileUrn: "urn:lineage:abc", fileVersionUrn: "urn:version:abc:3")

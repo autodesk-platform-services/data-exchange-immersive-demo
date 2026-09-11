@@ -128,8 +128,8 @@ struct USDUnitsTests {
 
     // MARK: - Reconciliation
 
-    /// The normal case, and the one the destructive bug would have broken: the loader already
-    /// applied the stage's units, so there is nothing left to correct.
+    /// The normal case: the loader already applied the stage's units, so there is nothing left to
+    /// correct and the scale must not be applied a second time.
     @Test func residualIsUnityWhenTheLoaderAlreadyAppliedTheUnits() {
         let metadata = USDStageMetadata(
             metersPerUnit: 0.001,

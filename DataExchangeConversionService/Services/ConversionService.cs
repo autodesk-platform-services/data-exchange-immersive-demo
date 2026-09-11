@@ -25,9 +25,8 @@ public sealed class ConversionService
     // the other already produced the artifacts.
     //
     // "failed" is deliberately not among them. A failed attempt is not a result worth keeping, and
-    // a client asking again is asking for a retry — which is what the visionOS Retry button was
-    // already trying to do, only to get a 409, swallow it, and poll the same failure back onto the
-    // screen. "superseded" is not among them either: it is the very case a new conversion resolves.
+    // a client asking again is asking for a retry. "superseded" is not among them either: it is the
+    // very case a new conversion resolves.
     private static readonly string[] ReusableStatuses = [ConversionStatus.Running, ConversionStatus.Completed];
 
     private static readonly ConcurrentDictionary<string, object> StartGates = new();
@@ -85,11 +84,9 @@ public sealed class ConversionService
     // The stored conversion for a job, or null when there is none.
     //
     // A conversion produced from an earlier version of the exchange is reported as "superseded"
-    // rather than as absent. It used to be reported as a 404 — indistinguishable from an exchange
-    // nobody had ever converted — which left a client unable to say why the artifacts it had a
-    // moment ago were gone. The visionOS store carried a comment listing the two causes it could
-    // not tell apart. Its artifacts are still not served; the difference is only that the client
-    // is now told which case it is in, and against which version.
+    // rather than as absent, so a client can tell it apart from an exchange nobody has ever
+    // converted and can see which version the exchange is on now. Its artifacts are not served
+    // either way.
     public ConversionMetadata? GetStatus(ExchangeIdentity exchange)
     {
         var metadata = ReadMetadata(GetJobOutputFolder(exchange.Job));
@@ -118,9 +115,8 @@ public sealed class ConversionService
     // Starts a conversion for the job, or returns the one that already answers the request.
     //
     // Asking for a conversion that is already running, or already finished, is not an error: the
-    // state the caller wants either is being reached or has been. It used to be a 409, which meant
-    // a client had to DELETE before it could ask again — and both clients simply worked around it.
-    // `force` discards whatever is stored and converts again regardless.
+    // state the caller wants either is being reached or has been. `force` discards whatever is
+    // stored and converts again regardless.
     public ConversionMetadata StartConversion(ExchangeIdentity exchange, string bearerToken, bool force)
     {
         var outputFolder = GetJobOutputFolder(exchange.Job);
@@ -200,13 +196,11 @@ public sealed class ConversionService
     // The conversion log.
     //
     // Not an artifact: it exists from the moment the job starts rather than when it finishes, it
-    // grows while the conversion runs, and its size and digest are meaningless until it stops. It
-    // was nonetheless listed in `artifacts`, which is why both clients reached for it by the
-    // hardcoded name "log.txt".
+    // grows while the conversion runs, and its size and digest are meaningless until it stops.
     //
     // Readable whatever state the job is in, including failed and superseded. It is the one file
-    // worth reading when a conversion has gone wrong, and gating it behind "are these artifacts
-    // still current" made a superseded job's log unreachable at exactly the wrong moment.
+    // worth reading when a conversion has gone wrong, which is exactly when the job is in one of
+    // those states.
     public Artifact? GetLog(JobId job)
     {
         var logPath = Path.Combine(GetJobOutputFolder(job), LogFileName);
@@ -268,11 +262,10 @@ public sealed class ConversionService
 
     // Resolves a name against the artifacts the conversion actually declared.
     //
-    // This used to resolve any file name that happened to exist in the job's folder, which made
-    // the job's own bookkeeping downloadable: `metadata.json` — including the full exception text
-    // a failed conversion stores in it — and, once presigning arrived, the secret next to it.
-    // Answering only for declared artifacts closes that by construction rather than by remembering
-    // to add each new internal file to a denylist.
+    // Answering only for declared artifacts keeps the job's own bookkeeping out of reach by
+    // construction — `metadata.json`, including the full exception text a failed conversion stores
+    // in it, and the presigning secret next to it — rather than by remembering to add each new
+    // internal file to a denylist.
     //
     // The content type comes from the declaration too, so the status and the bytes cannot disagree
     // about what a file is.
@@ -457,7 +450,7 @@ public sealed class ConversionService
             metadata.CompletedAt = DateTimeOffset.UtcNow;
             // A sentence for a person plus the step and the exception summary. The stack trace and
             // the inner exceptions went to the log above, which is readable in this state and is
-            // where a developer looks — they used to be sent to clients and rendered verbatim.
+            // where a developer looks.
             metadata.Error = new ConversionFailure
             {
                 Step = currentStepId,
@@ -544,10 +537,9 @@ public sealed class ConversionService
             : null;
     }
 
-    // Whether a stored conversion belongs to the exchange's current version. Both URNs missing
-    // is treated as current: either the exchange reports no version, or the conversion predates
-    // this field being recorded, and in both cases the pre-version behaviour is the honest
-    // fallback rather than discarding a conversion on a guess.
+    // Whether a stored conversion belongs to the exchange's current version. A missing URN on
+    // either side is treated as current: with nothing to compare, keeping the conversion is the
+    // honest fallback rather than discarding it on a guess.
     private static bool IsCurrent(ConversionMetadata metadata, ExchangeIdentity exchange)
     {
         if (string.IsNullOrWhiteSpace(exchange.FileVersionUrn)

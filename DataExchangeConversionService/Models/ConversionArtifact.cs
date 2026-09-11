@@ -4,12 +4,6 @@ using System.Text.Json.Serialization;
 namespace DataExchangeConversionService.Models;
 
 // One file produced by a conversion, as described to clients.
-//
-// Clients used to receive a bare file name and work the rest out themselves. Both apps picked
-// their model by string suffix — `endsWith(".usdz")` in the web app, `hasSuffix(ext)` in the
-// visionOS one — and neither could know how large a download would be until the response headers
-// arrived, which is why the visionOS progress bar started out indeterminate on a download that can
-// run to several hundred megabytes.
 public sealed class ConversionArtifact
 {
     public string Name { get; set; } = string.Empty;

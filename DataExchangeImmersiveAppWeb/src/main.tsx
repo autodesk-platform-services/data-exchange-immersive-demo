@@ -299,10 +299,9 @@ function ViewerTab({ token, exchange }: { token: string; exchange: Exchange }) {
 
 // The artifact is rendered from its presigned URL rather than from a blob.
 //
-// The `src` attributes of <model-viewer> and <model> cannot send an Authorization header, so this
-// used to fetch the whole artifact with the bearer token and hand over an object URL — which meant
-// a several-hundred-megabyte USDZ was materialised in the tab's memory before anything was drawn.
-// The presigned URL carries its own authorization, so the element streams the bytes itself.
+// The `src` attributes of <model-viewer> and <model> cannot send an Authorization header, and a
+// presigned URL carries its own authorization, so the element streams the bytes itself instead of
+// a several-hundred-megabyte USDZ being materialised in the tab's memory before anything is drawn.
 function ArtifactTab({
   status,
   type,
@@ -351,8 +350,8 @@ function ArtifactTab({
   );
 }
 
-// The artifact size now arrives with the status, so the loading placeholder can say how much is
-// being fetched rather than leaving a multi-hundred-megabyte download unexplained.
+// The artifact size arrives with the status, so the loading placeholder can say how much is being
+// fetched rather than leaving a multi-hundred-megabyte download unexplained.
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];

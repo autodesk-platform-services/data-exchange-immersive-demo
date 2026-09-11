@@ -54,8 +54,8 @@ struct ModelPlacementTests {
     // MARK: - Portal
 
     /// Both faces of the model have to stay inside the portal's volume, which runs from the window
-    /// plane at z = 0 back to z = −depth. A fixed size at a fixed depth used to push the far face
-    /// of a cube-ish model straight out through the back.
+    /// plane at z = 0 back to z = −depth. A fixed size at a fixed depth would push the far face of
+    /// a cube-ish model straight out through the back.
     @Test func portalKeepsBothFacesInsideTheVolume() throws {
         let depth = ModelPlacement.portalDepth
         // Deliberately off-origin and non-uniform, to catch a fit that positions the origin.

@@ -30,8 +30,7 @@ public sealed class ConversionMetadata
     // The version of the exchange this conversion was produced from. An exchange's contents change
     // when a new version is published, but its lineage URN — the key everything here is stored
     // under — does not, so this is what decides whether the artifacts still describe the exchange.
-    // Null for a conversion written before this field existed, or for an exchange whose version the
-    // Data Exchange SDK does not report.
+    // Null for an exchange whose version the Data Exchange SDK does not report.
     public string? FileVersionUrn { get; set; }
 
     // The version the exchange is at now, set only when this conversion has been superseded by a
@@ -41,9 +40,7 @@ public sealed class ConversionMetadata
     public string? CurrentFileVersionUrn { get; set; }
 
     // Presigned URL for the conversion log. The log is not an artifact — it exists before the
-    // conversion produces anything and grows while it runs — but it was listed as one, which is
-    // why both clients reached for it by the hardcoded name "log.txt". Filled in per request, not
-    // persisted.
+    // conversion produces anything and grows while it runs. Filled in per request, not persisted.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LogUrl { get; set; }
 }

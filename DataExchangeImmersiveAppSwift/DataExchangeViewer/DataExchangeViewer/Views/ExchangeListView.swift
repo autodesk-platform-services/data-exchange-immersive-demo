@@ -10,10 +10,9 @@ struct ExchangeListView: View {
     @Environment(AuthManager.self) private var auth
     @State private var listing: LoadState<ExchangeListing> = .loading
     @State private var searchText = ""
-    /// The cache's own in-memory index. Rows used to answer "is this cached?" with a
-    /// `USDzCache()` initialization (which creates the cache directory) plus a `fileExists`
-    /// probe — two syscalls per visible row, per body evaluation, on the main thread. Because the
-    /// index is observable, rows still update the moment a conversion finishes downloading.
+    /// The cache's own in-memory index, so a row answers "is this cached?" without a `fileExists`
+    /// probe per visible row, per body evaluation, on the main thread. The index is observable, so
+    /// rows still update the moment a conversion finishes downloading.
     private let cache = USDzCache.shared
 
     private var filteredExchanges: [Exchange] {
@@ -76,8 +75,8 @@ struct ExchangeListView: View {
     }
 
     /// As in the sidebar, "No exchanges in this project" is only reachable from `.loaded`. The
-    /// state starting at `.loading` also removes the flash of that message on first render and
-    /// on every project switch, which the previous `isLoading = false` default allowed.
+    /// state starting at `.loading` also keeps that message from flashing up on first render and
+    /// on every project switch.
     @ViewBuilder
     private var exchangeListStatus: some View {
         switch listing {

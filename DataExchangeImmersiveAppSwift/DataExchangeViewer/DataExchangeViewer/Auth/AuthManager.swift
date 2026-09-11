@@ -16,11 +16,10 @@ final class AuthManager: NSObject, ASWebAuthenticationPresentationContextProvidi
     private(set) var lastError: String?
 
     /// Whether the sign-in web session starts without the Autodesk cookies the browser already
-    /// holds. It used to be hardcoded on, which is a reasonable privacy default on a shared
-    /// computer but means typing a full Autodesk username and password on a head-mounted device
-    /// every single time. Off by default — the app already keeps a refresh token in the keychain,
-    /// so a reusable browser session adds little on a personal device — and exposed as a setting
-    /// for anyone who does share theirs.
+    /// holds. Off by default — the app already keeps a refresh token in the keychain, so a reusable
+    /// browser session adds little on a personal device, and turning it on means typing a full
+    /// Autodesk username and password on a head-mounted device every single time. Exposed as a
+    /// setting for anyone who does share their device.
     var usesEphemeralWebSession: Bool {
         didSet {
             UserDefaults.standard.set(usesEphemeralWebSession, forKey: Self.ephemeralWebSessionKey)

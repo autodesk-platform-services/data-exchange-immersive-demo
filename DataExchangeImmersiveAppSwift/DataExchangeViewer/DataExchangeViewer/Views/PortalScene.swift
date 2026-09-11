@@ -9,11 +9,11 @@ import simd
 
 /// Owns the RealityKit entities behind Portal mode.
 ///
-/// These used to be `@State` default values on the preview view. A `@State` initial value is
+/// Deliberately not `@State` default values on the preview view: a `@State` initial value is
 /// evaluated on every initialization of the view struct — and SwiftUI re-creates that struct on
-/// every parent invalidation — so a plane mesh, a `PortalMaterial`, and an environment probe were
-/// being allocated and immediately discarded on each pass. Building them from `RealityView`'s
-/// `make:` closure through this holder means the GPU resources are created exactly once.
+/// every parent invalidation — so a plane mesh, a `PortalMaterial`, and an environment probe would
+/// be allocated and immediately discarded on each pass. Building them from `RealityView`'s `make:`
+/// closure through this holder means the GPU resources are created exactly once.
 @MainActor
 final class PortalScene {
     private var root: Entity?
@@ -111,10 +111,10 @@ final class PortalScene {
             mode: .trigger
         ))
 
-        // Clip the world to a box rather than to a single plane. `clippingPlane` — the older
-        // property this replaces — cuts everything in front of one plane, which leaves the world's
-        // contents free to spread out sideways beyond the opening; a volume confines them to the
-        // frame the model was fitted into, so nothing can appear beside the portal.
+        // Clip the world to a box rather than to a single plane. `clippingPlane` cuts everything
+        // in front of one plane, which leaves the world's contents free to spread out sideways
+        // beyond the opening; a volume confines them to the frame the model was fitted into, so
+        // nothing can appear beside the portal.
         var portal = PortalComponent(target: world)
         portal.clippingMode = .volume(ModelPlacement.portalClippingVolume(
             width: requestedSize.x,

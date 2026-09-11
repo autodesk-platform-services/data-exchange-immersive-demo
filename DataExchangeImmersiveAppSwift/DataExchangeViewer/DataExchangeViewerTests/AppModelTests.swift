@@ -51,8 +51,8 @@ struct AppModelTests {
         #expect(model.immersionStyle is FullImmersionStyle)
     }
 
-    /// Two overlapping transitions (the picker's own task and a scene's `onChange`) used to set and
-    /// clear a single Bool, so whichever finished first re-enabled the picker while the other was
+    /// Two transitions can overlap — the picker's own task and a scene's `onChange` — so the
+    /// switches have to nest, or whichever finishes first re-enables the picker while the other is
     /// still animating.
     @Test func modeSwitchesNest() {
         let model = AppModel()

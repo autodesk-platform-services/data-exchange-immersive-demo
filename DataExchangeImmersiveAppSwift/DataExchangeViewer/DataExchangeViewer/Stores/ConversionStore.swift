@@ -13,7 +13,7 @@ enum ConversionState {
     case failed(String)
     /// A conversion exists, but of a version the exchange has since moved past. Distinct from
     /// `notConverted` because the person is told a *newer version was published* rather than that
-    /// nothing was ever converted — the service used to report both as a 404.
+    /// nothing was ever converted.
     case superseded
 }
 
@@ -59,24 +59,21 @@ final class ConversionStore {
     /// multi-byte character split across a range boundary still decodes correctly, and so the
     /// byte count is an exact offset for the next range request.
     private var logData = Data()
-    /// Whether the conversion log is on screen. The log is only polled while it is: previously
-    /// polling started unconditionally from `start`, which meant a guaranteed 404 on every
-    /// detail-view open for an exchange that had never been converted.
+    /// Whether the conversion log is on screen. The log is only polled while it is, so a detail
+    /// view opened on an exchange that has never been converted makes no log request at all.
     private var isLogVisible = false
 
-    /// The presigned log URL from the most recent status, when the service supplied one. The log
-    /// used to be fetched as an artifact called "log.txt" — a name the app had no business
-    /// knowing, and which stopped being in `artifacts` once the log became its own sub-resource.
+    /// The presigned log URL from the most recent status, when the service supplied one.
     private var logURL: String?
 
     /// Status polling starts fast, because a small conversion can finish in a few seconds, then
     /// backs off so a long BIM conversion isn't polled 100 times.
     private static let initialPollInterval: Duration = .seconds(2)
     private static let maximumPollInterval: Duration = .seconds(15)
-    /// How long to keep watching a conversion that reports neither completion nor failure. The
-    /// limit used to be five minutes, which a large BIM export can legitimately exceed and which
-    /// failed the wait without explaining itself. The wait is now visible and cancellable, so the
-    /// deadline only exists to stop polling a service that has quietly stopped making progress.
+    /// How long to keep watching a conversion that reports neither completion nor failure.
+    /// Generous, because a large BIM export can legitimately run for a long time and the wait is
+    /// visible and cancellable — the deadline only exists to stop polling a service that has
+    /// quietly stopped making progress.
     private static let pollTimeout: TimeInterval = 30 * 60
 
     /// The wait currently on screen, so moving from converting to downloading keeps one start
@@ -91,9 +88,8 @@ final class ConversionStore {
     }
 
     /// Cancels both polling loops. Called from the owning view's `onDisappear`, because a
-    /// `deinit` cannot do this job: the properties are main-actor isolated (a hard error under
-    /// Swift 6 strict concurrency), and the loops used to hold a strong reference to the store
-    /// anyway, so `deinit` was never reached while polling was in flight.
+    /// `deinit` cannot do this job: the properties are main-actor isolated, which is a hard error
+    /// under Swift 6 strict concurrency.
     func stop() {
         pollTask?.cancel()
         pollTask = nil
@@ -150,7 +146,7 @@ final class ConversionStore {
         do {
             let token = try await auth.validAccessToken()
             // The service answers with the job's state, adopting a conversion another client had
-            // already started rather than refusing with a 409 the way it used to.
+            // already started.
             let metadata = try await api.start(
                 urn: exchange.exchangeUrn,
                 collectionId: exchange.collectionId,
@@ -175,9 +171,8 @@ final class ConversionStore {
         startLogPollingIfVisible(auth: auth)
     }
 
-    /// Abandons the conversion in progress and discards whatever the service has produced for it.
-    /// Without this the only way out of a long conversion was to leave the screen, which left it
-    /// running on the service with nothing watching.
+    /// Abandons the conversion in progress and discards whatever the service has produced for it,
+    /// so a long conversion doesn't have to be left running on the service with nothing watching.
     func cancel(auth: AuthManager) async {
         stop()
         await clear(auth: auth)
@@ -217,8 +212,8 @@ final class ConversionStore {
             var interval = Self.initialPollInterval
             while !Task.isCancelled {
                 // `if let` rather than `guard let`: a guard binding would live to the end of the
-                // loop body and so pin the store across the sleep below, which is what kept an
-                // abandoned store — and its network traffic — alive for the full deadline.
+                // loop body and so pin the store across the sleep below, keeping an abandoned
+                // store — and its network traffic — alive for the full deadline.
                 let keepPolling: Bool
                 if let store = self {
                     keepPolling = await store.pollStatusOnce(auth: auth, deadline: deadline)
@@ -243,11 +238,10 @@ final class ConversionStore {
             )
             logURL = polled?.logUrl
             guard let metadata = polled else {
-                // The service no longer has a conversion for this exchange, which now means only
-                // one thing: another client deleted it. A conversion invalidated by a newly
-                // published version arrives as `.superseded` instead of as a 404. Either way
-                // there is nothing left to wait for, and polling to the deadline would just spend
-                // half an hour on a conversion that is gone.
+                // The service has no conversion for this exchange, which means only one thing:
+                // another client deleted it. One invalidated by a newly published version arrives
+                // as `.superseded` instead. There is nothing left to wait for, and polling to the
+                // deadline would just spend half an hour on a conversion that is gone.
                 state = .notConverted
                 return false
             }
@@ -346,8 +340,8 @@ final class ConversionStore {
         guard var activity = self.activity,
               case .downloading(let reported, let declared) = activity.phase else { return }
         // The size the service declared wins over the transfer's own count, which is
-        // `NSURLSessionTransferSizeUnknown` for a response without a Content-Length — arriving
-        // as nil here, and previously wiping out a total the status had already supplied.
+        // `NSURLSessionTransferSizeUnknown` for a response without a Content-Length and arrives
+        // as nil here.
         let total = declared ?? total
         let step = max((total ?? 0) / 100, 1 << 20)
         guard received - reported >= step || received == total else { return }

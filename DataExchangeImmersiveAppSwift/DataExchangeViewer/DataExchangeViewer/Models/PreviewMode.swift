@@ -7,13 +7,12 @@ import Foundation
 
 /// The three ways the app presents a converted model, each backed by a different scene type.
 ///
-/// Raw values are persisted and must stay stable. They were `peek`/`place`/`enter` up to the
-/// rename; `PreviewModeDefaults.migrate` maps those forward, so nothing here needs to know about
-/// the old names.
+/// Raw values are persisted and must stay stable; `PreviewModeDefaults.migrate` maps superseded
+/// values forward, so nothing here needs to know about them.
 ///
 /// The person-facing strings live here rather than in the picker so that the name of a mode, its
-/// hint, and its symbol are defined once — the rename is otherwise the kind of change that leaves
-/// one stale "Peek" behind in an accessibility hint nobody reads until VoiceOver reads it.
+/// hint, and its symbol are defined once, and a rename cannot leave a stale one behind in an
+/// accessibility hint nobody reads until VoiceOver reads it.
 enum PreviewMode: String, CaseIterable, Codable, Identifiable, Sendable {
     /// A portal inside the app's own plain window. The default: no passthrough replaced, no volume
     /// claimed, nothing to dismiss — the mode for glancing at a model while reading the file list.

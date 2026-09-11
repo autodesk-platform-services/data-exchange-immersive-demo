@@ -25,9 +25,7 @@ export interface ConversionArtifact {
   url?: string | null;
 }
 
-// Why a conversion failed. `error` used to be a single string built from the server's
-// `exception.ToString()` — type, message, stack trace and inner exceptions. The stack trace now
-// stays in the conversion log.
+// Why a conversion failed. The stack trace and the inner exceptions stay in the conversion log.
 export interface ConversionFailure {
   // One sentence, written to be shown to whoever is looking at the screen.
   message: string;
@@ -39,8 +37,7 @@ export interface ConversionFailure {
 
 export interface ConversionStatus {
   // "superseded" means the conversion finished, but of a version the exchange has since moved past:
-  // its artifacts are not served and a new conversion is what resolves it. Previously reported as a
-  // 404, indistinguishable from an exchange nobody had ever converted.
+  // its artifacts are not served and a new conversion is what resolves it.
   status: "running" | "completed" | "failed" | "superseded";
   artifacts: ConversionArtifact[];
   error?: ConversionFailure | null;
@@ -49,8 +46,7 @@ export interface ConversionStatus {
   fileVersionUrn?: string | null;
   currentFileVersionUrn?: string | null;
   // Presigned URL for the conversion log. The log is not an artifact, so it is named here rather
-  // than found in `artifacts` — which is what this client used to do, by the hardcoded name
-  // "log.txt".
+  // than found in `artifacts`.
   logUrl?: string | null;
   // ISO 8601, UTC, second resolution (e.g. "2026-09-10T12:04:12Z"). `updatedAt` advances at every
   // step of the pipeline, so a `running` job whose `updatedAt` has stopped moving is one whose
@@ -72,8 +68,7 @@ export function conversionDuration(status: ConversionStatus, now: number = Date.
 
 // A conversion job is addressed by the pair it was started for, spelled out as two path segments:
 // `/api/jobs/{collectionId}/{exchangeUrn}`. The pair is all the service needs, so the URL can be
-// built before any job exists — and, unlike the base64url-encoded job ID this replaced, it can be
-// read and typed by hand.
+// built before any job exists, and it can be read and typed by hand.
 //
 // `encodeURIComponent` escapes `:` even though a path segment may contain one, so it is put back:
 // every exchange URN has two, and the service itself hands out URLs with them unescaped.
@@ -86,8 +81,7 @@ function jobEndpoint(urn: string, collectionId: string): string {
 }
 
 // Starts a conversion, or adopts the one already running or already finished, and returns the job's
-// state as the service reports it. Idempotent: the service used to answer 409 when a conversion
-// existed, so the only way to ask again was to DELETE first.
+// state as the service reports it. Idempotent.
 //
 // `force` discards whatever is stored and converts again, which is the only way to re-run over a
 // conversion that has already completed.

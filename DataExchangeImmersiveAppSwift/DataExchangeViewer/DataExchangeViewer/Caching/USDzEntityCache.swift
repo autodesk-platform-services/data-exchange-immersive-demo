@@ -8,11 +8,10 @@ import RealityKit
 
 /// Parses a USDZ file once and hands out clones of the result.
 ///
-/// Portal and the spatial scenes used to load their own copies — they were each calling
-/// `Entity(contentsOf:)` on the same file, so a BIM model was parsed twice and held twice. Since
-/// `ModelStore` now loads once and re-parents between scenes, this exists for the remaining case:
-/// leaving an exchange and coming back to it, or Quick Look opening the same file. A clone shares
-/// the underlying `MeshResource` and materials, so the geometry is read and uploaded once.
+/// `ModelStore` loads a model once and re-parents it between scenes, so this covers the remaining
+/// case: leaving an exchange and coming back to it, or Quick Look opening the same file. A clone
+/// shares the underlying `MeshResource` and materials, so the geometry is read and uploaded once
+/// rather than a BIM model being parsed and held twice.
 ///
 /// One slot, keyed by URL: opening a different exchange releases the previous source entity, which
 /// bounds residency without needing reference counting across scenes.

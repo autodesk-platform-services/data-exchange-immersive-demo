@@ -97,7 +97,7 @@ struct ConversionStateTests {
     }
 
     /// The sentence is what a person reads; the exception summary follows it because this is a
-    /// developer-facing demo. Neither is a stack trace, which is what used to arrive here.
+    /// developer-facing demo. Neither of them is a stack trace.
     @Test func composesTheFailureTextFromTheMessageAndDetail() {
         let withDetail = ConversionFailure(
             message: "The conversion failed while bundling the USD files.",
@@ -114,8 +114,8 @@ struct ConversionStateTests {
         #expect(empty.userFacingText == "It failed.")
     }
 
-    /// A conversion of a version the exchange has moved past. Previously a 404, indistinguishable
-    /// from an exchange nobody had ever converted.
+    /// A conversion of a version the exchange has moved past, which names both the version it was
+    /// made from and the version the exchange is on now.
     @Test func decodesASupersededConversion() throws {
         let json = """
         {
@@ -209,7 +209,7 @@ struct ConversionStateTests {
     }
 
     /// The service declares the artifact size in the status, so the bar is determinate before any
-    /// bytes arrive — it used to sit at "unknown" until the response headers landed.
+    /// bytes arrive rather than waiting on the response headers.
     @Test func reportsProgressFromTheDeclaredSizeBeforeAnyBytesArrive() {
         var activity = ConversionActivity(since: Date())
         activity.phase = .downloading(receivedBytes: 0, totalBytes: 184_320_000)

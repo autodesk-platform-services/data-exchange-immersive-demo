@@ -25,10 +25,6 @@ between. The `:` of a URN is legal in a path segment, so in practice nothing has
 URN containing `?`, `#` or `/` does need percent-encoding (`%3F`, `%23`, `%2F`); the service decodes
 those back before it looks the exchange up.
 
-> The pair used to be packed into a single base64url-encoded path segment, which meant no URL could
-> be written by hand — hence this change. Clients that build the old `/api/jobs/{jobId}` URLs no
-> longer work.
-
 ## Live demo
 
 The application is deployed to an Azure Web App. Here's how you can try it out:
@@ -133,9 +129,9 @@ version is published, but its contents do, so the stored artifacts no longer des
 - Requesting a new conversion (`POST`) is not a conflict in this state: it discards the superseded
   artifacts and converts the current version.
 
-Reporting this as a 404 previously left a client unable to say why artifacts it had a moment ago
-were gone: an exchange nobody had ever converted and one whose conversion had just been invalidated
-looked identical.
+Reporting this as a 404 would leave a client unable to say why artifacts it had a moment ago are
+gone: an exchange nobody has ever converted and one whose conversion has just been invalidated
+would look identical.
 
 > A presigned artifact URL handed out before the conversion was superseded keeps working until the
 > conversion is replaced — see [Presigned artifact URLs](#presigned-artifact-urls).
@@ -151,9 +147,8 @@ When `status` is `failed`, `error` carries:
 | `detail` | The exception's type and message — **not** its stack trace |
 
 The full exception, with its stack trace and inner exceptions, goes to the
-[conversion log](#fetching-the-conversion-log), which is readable in this state. `error` used to be
-a single string built from `exception.ToString()`, which meant a server stack trace was handed to
-clients and rendered verbatim — the visionOS detail view put it straight on screen.
+[conversion log](#fetching-the-conversion-log), which is readable in this state — a server stack
+trace is never handed to a client.
 
 ### Presigned artifact URLs
 
@@ -213,7 +208,7 @@ Returns `text/plain`, inline, with range requests supported so a client can tail
 rather than refetch it whole on every poll. The status response's `logUrl` is a presigned
 equivalent that needs no `Authorization` header.
 
-The log is **not** an artifact and no longer appears in `artifacts`: it exists from the moment the
+The log is **not** an artifact and does not appear in `artifacts`: it exists from the moment the
 job starts rather than when it finishes, it grows while the conversion runs, and its size and digest
 are meaningless until it stops. It is readable whatever state the job is in — including `failed` and
 `superseded`, where it is the only thing that explains what happened.

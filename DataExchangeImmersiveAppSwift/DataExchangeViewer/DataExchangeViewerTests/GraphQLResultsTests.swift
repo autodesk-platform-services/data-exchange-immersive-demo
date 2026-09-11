@@ -82,8 +82,8 @@ struct GraphQLResultsTests {
 
     // MARK: - Load state
 
-    /// The sidebar used to claim "No hubs found" while the request was still in flight, because an
-    /// empty array and a pending load looked identical.
+    /// An empty array and a pending load must stay distinguishable, or the sidebar claims "No hubs
+    /// found" while the request is still in flight.
     @Test func loadStateOnlyYieldsAValueWhenLoaded() {
         #expect(LoadState<[Hub]>.loading.value == nil)
         #expect(LoadState<[Hub]>.failed("nope").value == nil)

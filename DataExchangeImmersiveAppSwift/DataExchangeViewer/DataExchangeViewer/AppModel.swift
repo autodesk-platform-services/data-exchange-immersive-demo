@@ -43,14 +43,13 @@ final class AppModel {
 
     private var storedPreviewMode: PreviewMode
 
-    /// Immersive mode is `.full` only. Progressive was the previous compromise, where the Digital
-    /// Crown doubled as the comfort control; a 1:1 walkthrough of a building with the room still
-    /// showing through gave two conflicting senses of where the floor was.
+    /// Immersive mode is `.full` only: in a 1:1 walkthrough of a building, the room showing through
+    /// gives two conflicting senses of where the floor is.
     var immersionStyle: any ImmersionStyle = FullImmersionStyle()
 
-    /// Number of mode switches currently in flight. Two overlapping transitions (the picker's own
-    /// task and a scene's `onChange`) each used to set and clear a single Bool, so whichever
-    /// finished first re-enabled the picker while the other was still animating.
+    /// Number of mode switches currently in flight. Counted rather than a single flag because two
+    /// transitions can overlap — the picker's own task and a scene's `onChange` — and the picker
+    /// has to stay disabled until the last of them finishes animating.
     private var modeSwitchDepth = 0
 
     /// True for the whole asynchronous open/dismiss sequence, so controls don't accept another mode

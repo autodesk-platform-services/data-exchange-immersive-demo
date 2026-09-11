@@ -34,9 +34,7 @@ struct ConversionArtifact: Decodable, Equatable {
 /// Why a conversion failed. Named to avoid colliding with `ConversionError`, which is this
 /// client's transport failures rather than the service's.
 ///
-/// `error` used to be a single string built from the server's `exception.ToString()` — type,
-/// message, stack trace and inner exceptions — which the detail view rendered verbatim. The stack
-/// trace now stays in the conversion log.
+/// The stack trace and the inner exceptions stay in the conversion log.
 struct ConversionFailure: Decodable, Equatable {
     /// One sentence, written to be shown to whoever is looking at the screen.
     let message: String
@@ -65,8 +63,7 @@ struct ConversionMetadata: Decodable {
     let currentFileVersionUrn: String?
 
     /// Presigned URL for the conversion log. The log is not an artifact, so it is named here
-    /// rather than found in `artifacts` — which is what the app used to do, by the hardcoded
-    /// name "log.txt".
+    /// rather than found in `artifacts`.
     let logUrl: String?
 
     /// When the service accepted the job.
@@ -79,8 +76,8 @@ struct ConversionMetadata: Decodable {
     let completedAt: Date?
 
     /// How long the conversion has been running, measured against the service's clock rather than
-    /// this app's — the elapsed-time readout used to start when the *screen* opened, which for an
-    /// exchange someone else was already converting was arbitrarily short.
+    /// from when this screen opened — for an exchange someone else is already converting, the two
+    /// are nowhere near the same.
     var startedOrCreatedAt: Date? { startedAt ?? createdAt }
 }
 

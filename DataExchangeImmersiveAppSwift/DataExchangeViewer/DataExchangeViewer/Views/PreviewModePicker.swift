@@ -23,13 +23,10 @@ struct PreviewModePicker: View {
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
     var body: some View {
-        // A three-way exclusive choice is what `Picker` is for. The hand-built capsules this
-        // replaced used `.buttonStyle(.plain)`, which suppresses the system hover effect — and on
-        // Vision Pro hover *is* the targeting feedback for eye tracking, so there was no way to
-        // tell what was about to be selected. `Picker` also supplies the selection semantics and
-        // the `.isSelected` accessibility trait that were previously applied by hand, and its
-        // system material stays legible against arbitrary passthrough where the hardcoded
-        // black-and-white capsules did not.
+        // A three-way exclusive choice is what `Picker` is for. It keeps the system hover effect,
+        // which on Vision Pro *is* the targeting feedback for eye tracking, supplies the selection
+        // semantics and the `.isSelected` accessibility trait, and its system material stays
+        // legible against arbitrary passthrough.
         Picker("Preview mode", selection: modeSelection) {
             ForEach(PreviewMode.allCases) { mode in
                 Text(mode.title)

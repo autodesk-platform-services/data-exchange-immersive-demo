@@ -26,9 +26,9 @@ struct ExplodeLayoutTests {
         #expect(ExplodeLayout.axis(for: storeys) ≈ SIMD3<Float>(0, 1, 0))
     }
 
-    /// The regression volume weighting exists to prevent: a storey stack with a lot of small
-    /// fixtures spread across each floor plate. Unweighted, the fixtures outvote the storeys by
-    /// sheer count and the building explodes sideways.
+    /// What volume weighting exists to prevent: a storey stack with a lot of small fixtures spread
+    /// across each floor plate. Unweighted, the fixtures outvote the storeys by sheer count and the
+    /// building explodes sideways.
     @Test func volumeWeightingKeepsFixturesFromOutvotingStoreys() {
         var parts = storeys
         for index in 0..<200 {

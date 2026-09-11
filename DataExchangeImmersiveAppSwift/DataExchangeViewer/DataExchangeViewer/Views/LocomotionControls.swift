@@ -93,9 +93,9 @@ struct LocomotionControls: View {
 /// A thumbstick-style pad. Drag from anywhere inside it; the knob follows and the offset from the
 /// centre becomes horizontal velocity in the direction of gaze.
 ///
-/// A pad rather than four buttons, which is what this replaced. Holding a button flew at a fixed
-/// speed in a fixed direction, so following a corridor meant a sequence of discrete holds; a puck
-/// gives a continuous heading, which is what walking through a building actually needs.
+/// A pad rather than four directional buttons: holding a button flies at a fixed speed in a fixed
+/// direction, so following a corridor means a sequence of discrete holds, while a puck gives a
+/// continuous heading — which is what walking through a building actually needs.
 private struct FlyPuck: View {
     @Binding var stick: SIMD2<Float>
     /// A discrete step, for input that can't drag. 1 is forward, −1 back.

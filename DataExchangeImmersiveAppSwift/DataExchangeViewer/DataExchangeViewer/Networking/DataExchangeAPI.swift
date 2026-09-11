@@ -7,9 +7,8 @@ import Foundation
 
 /// What a project's exchange listing turned up, plus what it could not reach.
 ///
-/// The second half matters: the previous listing silently returned the first page of everything
-/// and nothing nested more than five folders deep, so an exchange that existed but wasn't shown
-/// was indistinguishable from one that didn't exist.
+/// The second half matters: without it, an exchange that exists but isn't shown is
+/// indistinguishable from one that doesn't exist.
 struct ExchangeListing {
     var exchanges: [Exchange] = []
     /// Folders whose exchange list the service split across pages. `Folder.exchanges` takes no
@@ -25,9 +24,9 @@ struct ExchangeListing {
 struct DataExchangeAPI {
     private let client = GraphQLClient()
 
-    /// Cap on the number of folders whose subfolders are looked up while walking a project.
-    /// Folder depth is no longer bounded, so this is what stops a pathological tree from turning
-    /// one list into thousands of requests. Truncation here is reported, not hidden.
+    /// Cap on the number of folders whose subfolders are looked up while walking a project. Folder
+    /// depth itself is unbounded, so this is what stops a pathological tree from turning one list
+    /// into thousands of requests. Truncation here is reported, not hidden.
     private static let folderVisitBudget = 300
 
     /// Subfolder lookups within one level of the tree run a few at a time. One request per folder
@@ -36,11 +35,10 @@ struct DataExchangeAPI {
     private static let folderRequestConcurrency = 6
 
     func hubs(token: String) async throws -> [Hub] {
-        // Every hub the token can reach is listed. This used to drop any hub whose name began with
-        // "Team Hub" — a guess at "a personal hub with no exchanges in it" that would also make a
-        // hub genuinely named that vanish, with nothing in the UI to explain it and no way to
-        // reach it. The schema exposes no attribute that distinguishes the two, so a hub with no
-        // Data Exchange projects now shows an empty project list, which at least says so.
+        // Every hub the token can reach is listed. The schema exposes no attribute that marks a
+        // personal hub with no exchanges in it, and filtering on the name would also hide a hub
+        // genuinely named that, so a hub with no Data Exchange projects shows an empty project
+        // list instead — which at least says so.
         let query = """
         query GetHubs($cursor: String) {
           hubs(pagination: { cursor: $cursor }) {
@@ -72,10 +70,10 @@ struct DataExchangeAPI {
 
     /// Walks a project's folder tree breadth-first, collecting the exchanges in every folder.
     ///
-    /// This replaces a single query built from a recursive GraphQL fragment nested five levels
-    /// deep. That query grew exponentially with the depth bound, and anything below the bound was
-    /// simply absent from the result. Discovering each level with its own `folders` query costs
-    /// more round trips but has no depth limit and can follow the pagination cursor.
+    /// Discovering each level with its own `folders` query costs more round trips than one query
+    /// built from a recursive GraphQL fragment, but it has no depth limit — a fragment has to be
+    /// nested to a fixed bound, and grows exponentially with it — and it can follow the pagination
+    /// cursor.
     func exchanges(token: String, projectId: String) async throws -> ExchangeListing {
         var listing = ExchangeListing()
         var seenFolderIDs: Set<String> = []

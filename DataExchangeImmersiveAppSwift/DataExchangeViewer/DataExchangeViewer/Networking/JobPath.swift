@@ -6,8 +6,7 @@
 import Foundation
 
 /// The path that addresses a conversion job on the service: `{collectionId}/{exchangeUrn}`, each
-/// half escaped where a character is not legal in a path segment. The pair used to be packed into
-/// one base64url-encoded segment, which no one could read or type.
+/// half escaped where a character is not legal in a path segment.
 ///
 /// The escaping lives here because the obvious ways to do it are both wrong.
 /// `addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)` leaves `/` alone — it is a path
