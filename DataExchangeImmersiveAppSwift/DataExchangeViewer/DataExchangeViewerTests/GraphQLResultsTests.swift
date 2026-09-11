@@ -50,11 +50,13 @@ struct GraphQLResultsTests {
         {
           "id": "e1",
           "name": "Basement",
+          "collectionId": "project-1",
           "fileUrn": "urn:lineage:abc",
           "fileVersionUrn": "urn:version:abc:3"
         }
         """
         let exchange = try JSONDecoder().decode(Exchange.self, from: Data(json.utf8))
+        #expect(exchange.collectionId == "project-1")
         #expect(exchange.exchangeUrn == "urn:lineage:abc")
         #expect(exchange.cacheKeyUrn == "urn:version:abc:3")
     }
