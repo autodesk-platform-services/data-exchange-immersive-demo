@@ -9,6 +9,7 @@ import {
   findArtifact,
   getStatus,
   startConversion,
+  type ConversionArtifact,
   type ConversionStatus,
 } from "./conversion.ts";
 import { initViewer, loadExchange } from "./viewer.ts";
@@ -301,18 +302,19 @@ function ArtifactTab({
   urn,
   collectionId,
   status,
-  extension,
+  type,
   render,
 }: {
   token: string;
   urn: string;
   collectionId: string;
   status: ConversionStatus | null | undefined;
-  extension: string;
+  type: ConversionArtifact["type"];
   render: (blobUrl: string) => React.ReactNode;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const fileName = findArtifact(status, extension);
+  const artifact = findArtifact(status, type);
+  const fileName = artifact?.name;
 
   useEffect(() => {
     if (!fileName) {
@@ -331,13 +333,17 @@ function ArtifactTab({
   }, [token, urn, collectionId, fileName]);
 
   if (status?.status !== "completed") {
-    return <div className="tab-body placeholder">Run a conversion to view the {extension} artifact.</div>;
+    return <div className="tab-body placeholder">Run a conversion to view the {type} artifact.</div>;
   }
-  if (!fileName) {
-    return <div className="tab-body placeholder">No {extension} artifact was produced.</div>;
+  if (!artifact || !fileName) {
+    return <div className="tab-body placeholder">No {type} artifact was produced.</div>;
   }
   if (!blobUrl) {
-    return <div className="tab-body placeholder">Loading {extension}…</div>;
+    return (
+      <div className="tab-body placeholder">
+        Loading {type} ({formatBytes(artifact.size)})…
+      </div>
+    );
   }
   return (
     <div className="tab-body">
@@ -347,6 +353,20 @@ function ArtifactTab({
       {render(blobUrl)}
     </div>
   );
+}
+
+// The artifact size now arrives with the status, so the loading placeholder can say how much is
+// being fetched rather than leaving a multi-hundred-megabyte download unexplained.
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -500,7 +520,7 @@ function MainPane({
           urn={urn}
           collectionId={collectionId}
           status={status}
-          extension=".glb"
+          type="glb"
           render={(url) => (
             <model-viewer src={url} auto-rotate camera-controls style={{ width: "100%", height: "100%" }} />
           )}
@@ -512,7 +532,7 @@ function MainPane({
           urn={urn}
           collectionId={collectionId}
           status={status}
-          extension=".usdz"
+          type="usdz"
           render={(url) => (
             <>
               <p className="note">

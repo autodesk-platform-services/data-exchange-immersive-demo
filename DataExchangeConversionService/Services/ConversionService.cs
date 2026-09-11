@@ -104,11 +104,13 @@ public sealed class ConversionService
         Directory.CreateDirectory(outputFolder);
 
         // Mark the conversion as running, then run it in the background.
-        File.WriteAllText(Path.Combine(outputFolder, LogFileName), string.Empty);
+        var logPath = Path.Combine(outputFolder, LogFileName);
+        File.WriteAllText(logPath, string.Empty);
 
         var metadata = new ConversionMetadata
         {
-            Artifacts = [LogFileName],
+            // Described again when the conversion settles, because the log grows while it runs.
+            Artifacts = [ConversionArtifact.Describe(logPath)],
             FileVersionUrn = exchange.FileVersionUrn
         };
         WriteMetadata(outputFolder, metadata);
@@ -138,14 +140,7 @@ public sealed class ConversionService
             return null;
         }
 
-        var contentType = Path.GetExtension(artifactName).ToLowerInvariant() switch
-        {
-            ".obj" => "model/obj",
-            ".glb" => "model/gltf-binary",
-            ".usdz" => "model/vnd.usdz+zip",
-            ".txt" => "text/plain",
-            _ => "application/octet-stream",
-        };
+        var (_, contentType) = ArtifactTypes.For(artifactPath);
         return new Artifact(artifactPath, Path.GetFileName(artifactPath), contentType);
     }
 
@@ -225,7 +220,7 @@ public sealed class ConversionService
                 var destinationPath = Path.Combine(outputFolder, fileName);
                 Step($"moving extracted artifact {fileName}");
                 File.Move(sourcePath, destinationPath, overwrite: true);
-                metadata.Artifacts.Add(fileName);
+                RecordArtifact(metadata, destinationPath);
             }
 
             Step("deleting temp folder");
@@ -235,7 +230,8 @@ public sealed class ConversionService
             // Post-process each generated OBJ into a self-contained binary glTF (*.glb).
             // USDZ is built separately from the SDK's native USD output below.
             var objFileNames = metadata.Artifacts
-                .Where(name => name.EndsWith(".obj", StringComparison.OrdinalIgnoreCase))
+                .Where(artifact => artifact.Type == "obj")
+                .Select(artifact => artifact.Name)
                 .ToList();
             foreach (var objFileName in objFileNames)
             {
@@ -251,7 +247,7 @@ public sealed class ConversionService
                 {
                     GltfConverter.ConvertObjToGlb(objPath, glbPath, convertZUpToYUp: true, logger: _logger, logPath: logPath);
                 }
-                metadata.Artifacts.Add(glbFileName);
+                RecordArtifact(metadata, glbPath);
                 ForceFullGarbageCollection(_logger, "OBJ to GLB conversion");
             }
 
@@ -276,14 +272,14 @@ public sealed class ConversionService
             var usdzPath = Path.Combine(outputFolder, usdzFileName);
             Step($"bundling downloaded USD files into {usdzFileName}");
             UsdzConverter.BundleUsdFolder(usdFolder, usdzPath, _logger, logPath);
-            metadata.Artifacts.Add(usdzFileName);
+            RecordArtifact(metadata, usdzPath);
 
             Step("deleting USD temp folder");
             Directory.Delete(usdFolder, recursive: true);
             ForceFullGarbageCollection(_logger, "USD to USDZ bundling");
 
             metadata.Status = ConversionStatus.Completed;
-            Log($"Exchange conversion completed. Artifacts: {string.Join(", ", metadata.Artifacts)}.");
+            Log($"Exchange conversion completed. Artifacts: {string.Join(", ", metadata.Artifacts.Select(artifact => artifact.Name))}.");
         }
         catch (Exception ex)
         {
@@ -296,7 +292,19 @@ public sealed class ConversionService
             metadata.Error = $"Failed while {currentStep}. {ex}";
         }
 
+        // Nothing appends to the log past this point, so its recorded size and digest now
+        // describe the finished file rather than the empty one the job started with.
+        RecordArtifact(metadata, logPath);
         WriteMetadata(outputFolder, metadata);
+    }
+
+    // Adds an artifact's description, replacing any earlier description of the same file.
+    private static void RecordArtifact(ConversionMetadata metadata, string path)
+    {
+        var artifact = ConversionArtifact.Describe(path);
+        metadata.Artifacts.RemoveAll(existing =>
+            string.Equals(existing.Name, artifact.Name, StringComparison.OrdinalIgnoreCase));
+        metadata.Artifacts.Add(artifact);
     }
 
     // TODO: remove alongside MemoryTelemetry once the memory investigation is done.

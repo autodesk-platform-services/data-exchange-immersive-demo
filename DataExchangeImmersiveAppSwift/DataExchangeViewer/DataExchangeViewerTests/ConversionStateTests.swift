@@ -11,15 +11,36 @@ import Foundation
 /// to download, and what to show while waiting.
 @Suite("Conversion state")
 struct ConversionStateTests {
+    private func artifact(name: String, type: String, size: Int64 = 0) -> ConversionArtifact {
+        ConversionArtifact(name: name, type: type, contentType: "application/octet-stream", size: size, checksum: nil)
+    }
+
     // MARK: - Metadata
 
     @Test func decodesACompletedConversion() throws {
         let json = """
-        { "status": "completed", "artifacts": ["model.usdz", "log.txt"], "error": null }
+        {
+          "status": "completed",
+          "artifacts": [
+            {
+              "name": "model.usdz",
+              "type": "usdz",
+              "contentType": "model/vnd.usdz+zip",
+              "size": 184320000,
+              "checksum": "sha256:abc"
+            },
+            { "name": "log.txt", "type": "log", "contentType": "text/plain", "size": 512, "checksum": null }
+          ],
+          "error": null
+        }
         """
         let metadata = try JSONDecoder().decode(ConversionMetadata.self, from: Data(json.utf8))
         #expect(metadata.status == .completed)
-        #expect(metadata.artifacts == ["model.usdz", "log.txt"])
+        #expect(metadata.artifacts.map(\.name) == ["model.usdz", "log.txt"])
+        #expect(metadata.artifacts.first?.size == 184_320_000)
+        #expect(metadata.artifacts.first?.contentType == "model/vnd.usdz+zip")
+        #expect(metadata.artifacts.first?.checksum == "sha256:abc")
+        #expect(metadata.artifacts.last?.checksum == nil)
         #expect(metadata.error == nil)
     }
 
@@ -45,22 +66,34 @@ struct ConversionStateTests {
 
     // MARK: - Artifact selection
 
+    /// Selection is by `type`, not by file-name suffix: the names come from the exchange's
+    /// contents and are not predictable, and an exchange called `Plans.usdz.rvt` should not be
+    /// mistaken for a model.
     @Test func findsTheUSDZAmongTheArtifacts() {
         let metadata = ConversionMetadata(
             status: .completed,
-            artifacts: ["log.txt", "metadata.json", "Basement.usdz"],
+            artifacts: [
+                artifact(name: "log.txt", type: "log"),
+                artifact(name: "Basement.obj", type: "obj"),
+                artifact(name: "Basement.usdz", type: "usdz", size: 1_024),
+            ],
             error: nil
         )
-        #expect(ConversionAPI.findArtifact(metadata, extension: ".usdz") == "Basement.usdz")
-        #expect(ConversionAPI.findArtifact(metadata, extension: ".txt") == "log.txt")
+        #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz)?.name == "Basement.usdz")
+        #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz)?.size == 1_024)
+        #expect(ConversionAPI.findArtifact(metadata, type: "log")?.name == "log.txt")
     }
 
     /// A conversion that reports success without producing a model is a failure the detail view
     /// has to explain, so this must not return something unusable.
     @Test func reportsNoUSDZWhenTheConversionProducedNone() {
-        let metadata = ConversionMetadata(status: .completed, artifacts: ["log.txt"], error: nil)
-        #expect(ConversionAPI.findArtifact(metadata, extension: ".usdz") == nil)
-        #expect(ConversionAPI.findArtifact(nil, extension: ".usdz") == nil)
+        let metadata = ConversionMetadata(
+            status: .completed,
+            artifacts: [artifact(name: "log.txt", type: "log")],
+            error: nil
+        )
+        #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz) == nil)
+        #expect(ConversionAPI.findArtifact(nil, type: ArtifactType.usdz) == nil)
     }
 
     // MARK: - Progress
@@ -70,6 +103,14 @@ struct ConversionStateTests {
     @Test func reportsNoFractionWhileConverting() {
         let activity = ConversionActivity(since: Date())
         #expect(activity.fractionCompleted == nil)
+    }
+
+    /// The service declares the artifact size in the status, so the bar is determinate before any
+    /// bytes arrive — it used to sit at "unknown" until the response headers landed.
+    @Test func reportsProgressFromTheDeclaredSizeBeforeAnyBytesArrive() {
+        var activity = ConversionActivity(since: Date())
+        activity.phase = .downloading(receivedBytes: 0, totalBytes: 184_320_000)
+        #expect(activity.fractionCompleted == 0)
     }
 
     @Test func reportsNoFractionForADownloadOfUnknownLength() {

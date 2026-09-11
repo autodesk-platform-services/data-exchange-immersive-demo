@@ -242,12 +242,14 @@ final class ConversionStore {
     }
 
     private func downloadArtifact(metadata: ConversionMetadata, auth: AuthManager) async {
-        guard let fileName = ConversionAPI.findArtifact(metadata, extension: ".usdz") else {
+        guard let artifact = ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz) else {
             state = .failed("The conversion finished without producing a USDZ file.")
             return
         }
         var activity = self.activity ?? ConversionActivity(since: Date())
-        activity.phase = .downloading(receivedBytes: 0, totalBytes: nil)
+        // The service reports the size up front, so the progress bar is determinate from the
+        // first byte instead of waiting on a Content-Length to arrive with the response headers.
+        activity.phase = .downloading(receivedBytes: 0, totalBytes: artifact.size)
         state = .running(activity)
         do {
             let token = try await auth.validAccessToken()
@@ -257,7 +259,7 @@ final class ConversionStore {
             let downloaded = try await api.downloadArtifact(
                 urn: exchange.exchangeUrn,
                 collectionId: exchange.collectionId,
-                fileName: fileName,
+                fileName: artifact.name,
                 token: token
             ) { [store = self] received, total in
                 // Delivered on URLSession's delegate queue, so this hops back to the actor that
@@ -293,7 +295,11 @@ final class ConversionStore {
     /// finished or was cancelled can't resurrect the running state.
     private func reportDownload(received: Int64, total: Int64?) {
         guard var activity = self.activity,
-              case .downloading(let reported, _) = activity.phase else { return }
+              case .downloading(let reported, let declared) = activity.phase else { return }
+        // The size the service declared wins over the transfer's own count, which is
+        // `NSURLSessionTransferSizeUnknown` for a response without a Content-Length — arriving
+        // as nil here, and previously wiping out a total the status had already supplied.
+        let total = declared ?? total
         let step = max((total ?? 0) / 100, 1 << 20)
         guard received - reported >= step || received == total else { return }
         activity.phase = .downloading(receivedBytes: received, totalBytes: total)

@@ -10,9 +10,20 @@ const BASE_URL = (
   new URL(window.location.href).searchParams.get("service") ?? DEFAULT_BASE_URL
 ).replace(/\/+$/, "");
 
+// One file produced by a conversion. The service describes each artifact rather than just naming
+// it, so a caller selects one by `type` instead of matching a file-name suffix, and knows the
+// download size before the first byte arrives.
+export interface ConversionArtifact {
+  name: string;
+  type: "obj" | "mtl" | "glb" | "usdz" | "log" | "unknown";
+  contentType: string;
+  size: number;
+  checksum?: string | null;
+}
+
 export interface ConversionStatus {
   status: "running" | "completed" | "failed";
-  artifacts: string[];
+  artifacts: ConversionArtifact[];
   error?: string | null;
 }
 
@@ -104,10 +115,11 @@ export async function fetchArtifactText(
   return (await fetchArtifact(token, urn, collectionId, fileName)).text();
 }
 
-// Picks the first artifact with the given extension (e.g. ".glb", ".usdz"), or undefined.
+// Picks the first artifact of the given type (e.g. "glb", "usdz"), or undefined. Selection is by
+// type rather than by file name, which is derived from the exchange's contents and unpredictable.
 export function findArtifact(
   status: ConversionStatus | null | undefined,
-  extension: string,
-): string | undefined {
-  return status?.artifacts.find((name) => name.toLowerCase().endsWith(extension));
+  type: ConversionArtifact["type"],
+): ConversionArtifact | undefined {
+  return status?.artifacts.find((artifact) => artifact.type === type);
 }

@@ -67,16 +67,22 @@ The endpoint will return JSON object with extraction metadata:
   "error": null,          // Error message in case "status" is "failed"
   "fileVersionUrn": "urn:adsk.wipprod:fs.file:vf.lbJRla4QRhO-Xnu-1bEg5Q?version=3",
                           // The exchange version these artifacts were produced from
-  "artifacts": [          // List of filenames of generated artifacts in case "status" is "completed"
-    "foo.obj",
-    "foo.mtl",
-    "foo.glb",            // glTF binary post-processed from the OBJ/MTL via SharpGLTF
-    "foo.usdz"            // USDZ package bundled from the SDK's native USD folder
+  "artifacts": [          // Generated artifacts, described rather than just named
+    {
+      "name": "foo.usdz",
+      "type": "usdz",     // "obj" | "mtl" | "glb" | "usdz" | "log" | "unknown"
+      "contentType": "model/vnd.usdz+zip",
+      "size": 184320000,  // bytes, so a client can show real download progress
+      "checksum": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    }
   ]
 }
 ```
 
 A job ID that is not valid base64url, or that does not decode to a `{collectionId}|{exchangeUrn}` pair, is answered with `400 Bad Request` on every endpoint.
+
+Select an artifact by its `type` rather than by parsing `name` — the file names are derived from
+the exchange's contents and are not predictable.
 
 The endpoint returns `404 Not Found` when there is no conversion for the exchange — *including* when the only stored conversion was produced from a version the exchange has since moved past. An exchange's lineage URN doesn't change when a new version is published, but its contents do, so a stale conversion is reported as absent rather than as the current one. Requesting a new conversion (`POST`) discards the superseded artifacts and converts the current version; artifact fetches are gated the same way, so a stale USDZ is never served.
 

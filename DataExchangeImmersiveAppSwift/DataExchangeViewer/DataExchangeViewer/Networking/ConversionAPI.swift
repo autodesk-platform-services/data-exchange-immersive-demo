@@ -137,8 +137,9 @@ struct ConversionAPI {
         }
     }
 
-    static func findArtifact(_ metadata: ConversionMetadata?, extension ext: String) -> String? {
-        metadata?.artifacts.first { $0.hasSuffix(ext) }
+    /// The first artifact of the given type, or nil when the conversion produced none.
+    static func findArtifact(_ metadata: ConversionMetadata?, type: String) -> ConversionArtifact? {
+        metadata?.artifacts.first { $0.type == type }
     }
 }
 

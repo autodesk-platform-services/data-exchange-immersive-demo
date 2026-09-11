@@ -5,7 +5,7 @@ public sealed class ConversionMetadata
 {
     public string Status { get; set; } = ConversionStatus.Running;
 
-    public List<string> Artifacts { get; set; } = [];
+    public List<ConversionArtifact> Artifacts { get; set; } = [];
 
     public string? Error { get; set; }
 

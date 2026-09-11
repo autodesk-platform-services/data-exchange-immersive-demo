@@ -11,10 +11,29 @@ enum ConversionStatusValue: String, Codable {
     case failed
 }
 
+/// One file produced by a conversion.
+///
+/// The service describes each artifact rather than just naming it, so the app selects the model it
+/// wants by `type` instead of matching a file-name suffix, and knows the download size before the
+/// first byte arrives.
+struct ConversionArtifact: Decodable, Equatable {
+    let name: String
+    let type: String
+    let contentType: String
+    let size: Int64
+    let checksum: String?
+}
+
 struct ConversionMetadata: Decodable {
     let status: ConversionStatusValue
-    let artifacts: [String]
+    let artifacts: [ConversionArtifact]
     let error: String?
+}
+
+/// The artifact types the app looks for. The service can produce others (`obj`, `mtl`, `log`);
+/// these are the ones the app has a use for.
+enum ArtifactType {
+    static let usdz = "usdz"
 }
 
 enum ConversionError: Error {
