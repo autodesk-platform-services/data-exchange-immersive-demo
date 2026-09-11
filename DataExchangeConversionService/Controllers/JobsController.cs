@@ -5,12 +5,12 @@ using DataExchangeConversionService.Services;
 
 namespace DataExchangeConversionService.Controllers;
 
-// A conversion job, addressed by the (collection ID, exchange URN) pair it was started for, spelled
+// A conversion job, addressed by the (project ID, exchange URN) pair it was started for, spelled
 // out as two path segments — see JobId. The pair is deterministic, so a client builds the job's URL
 // itself rather than having to create a job first to learn where it lives, and a developer testing
 // the service pastes in the two values as they appear in ACC rather than encoding them first.
 [ApiController]
-[Route("api/jobs/{collectionId}/{exchangeUrn}")]
+[Route("api/jobs/{projectId}/{exchangeUrn}")]
 public sealed class JobsController : ControllerBase
 {
     private readonly ConversionService _conversionService;
@@ -24,9 +24,9 @@ public sealed class JobsController : ControllerBase
     // from a version the exchange has since moved past is reported with status "superseded" and
     // carries no artifact URLs — see ConversionService.GetStatus.
     [HttpGet]
-    public async Task<IActionResult> GetStatus(string collectionId, string exchangeUrn)
+    public async Task<IActionResult> GetStatus(string projectId, string exchangeUrn)
     {
-        var (failure, exchange) = await ResolveJobAsync(JobId.FromRoute(collectionId, exchangeUrn));
+        var (failure, exchange) = await ResolveJobAsync(JobId.FromRoute(projectId, exchangeUrn));
         if (failure is not null) { return failure; }
 
         var status = _conversionService.GetStatus(exchange);
@@ -47,11 +47,11 @@ public sealed class JobsController : ControllerBase
     // conversion or can go straight to the artifacts without a second request.
     [HttpPost]
     public async Task<IActionResult> StartConversion(
-        string collectionId,
+        string projectId,
         string exchangeUrn,
         [FromQuery] bool force = false)
     {
-        var (failure, exchange) = await ResolveJobAsync(JobId.FromRoute(collectionId, exchangeUrn));
+        var (failure, exchange) = await ResolveJobAsync(JobId.FromRoute(projectId, exchangeUrn));
         if (failure is not null) { return failure; }
 
         TryGetBearerToken(out var bearerToken);
@@ -64,9 +64,9 @@ public sealed class JobsController : ControllerBase
     // Deletes the conversion results for a job. This does not affect the exchange itself or its
     // contents on the Data Exchange service.
     [HttpDelete]
-    public async Task<IActionResult> DeleteConversion(string collectionId, string exchangeUrn)
+    public async Task<IActionResult> DeleteConversion(string projectId, string exchangeUrn)
     {
-        var (failure, exchange) = await ResolveJobAsync(JobId.FromRoute(collectionId, exchangeUrn));
+        var (failure, exchange) = await ResolveJobAsync(JobId.FromRoute(projectId, exchangeUrn));
         if (failure is not null) { return failure; }
 
         _conversionService.DeleteObjConversion(exchange.Job);
@@ -81,12 +81,12 @@ public sealed class JobsController : ControllerBase
     [HttpGet("artifacts/{artifact}")]
     [Produces("model/obj", "model/mtl", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
     public async Task<IActionResult> GetArtifact(
-        string collectionId,
+        string projectId,
         string exchangeUrn,
         string artifact,
         [FromQuery] string? secret)
     {
-        var job = JobId.FromRoute(collectionId, exchangeUrn);
+        var job = JobId.FromRoute(projectId, exchangeUrn);
 
         if (!string.IsNullOrEmpty(secret))
         {
@@ -149,9 +149,9 @@ public sealed class JobsController : ControllerBase
     // by the presigned `logUrl` in a status response.
     [HttpGet("log")]
     [Produces("text/plain")]
-    public async Task<IActionResult> GetLog(string collectionId, string exchangeUrn, [FromQuery] string? secret)
+    public async Task<IActionResult> GetLog(string projectId, string exchangeUrn, [FromQuery] string? secret)
     {
-        var job = JobId.FromRoute(collectionId, exchangeUrn);
+        var job = JobId.FromRoute(projectId, exchangeUrn);
 
         if (!string.IsNullOrEmpty(secret))
         {
@@ -179,7 +179,7 @@ public sealed class JobsController : ControllerBase
     // failed. A missing or blank path segment never reaches here — such a URL matches no route.
     private async Task<(IActionResult? Failure, ExchangeIdentity Exchange)> ResolveJobAsync(JobId job)
     {
-        var unresolved = new ExchangeIdentity(job, null);
+        var unresolved = new ExchangeIdentity(job, null, null);
 
         if (!TryGetBearerToken(out var bearerToken))
         {

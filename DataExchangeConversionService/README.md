@@ -7,12 +7,12 @@ Simple ASP.NET application extracting geometry data from [Data Exchanges](https:
 Every endpoint addresses a *conversion job*, named by the two values the job was started for:
 
 ```
-/api/jobs/{collectionId}/{exchangeUrn}
+/api/jobs/{projectId}/{exchangeUrn}
 ```
 
 | Part | Description | Example |
 | --- | --- | --- |
-| `{collectionId}` | Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{projectId}` | ACC project ID; the service resolves its Data Exchange collection ID through the SDK | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{exchangeUrn}` | URN of your exchange | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 
 ```
@@ -25,6 +25,10 @@ between. The `:` of a URN is legal in a path segment, so in practice nothing has
 URN containing `?`, `#` or `/` does need percent-encoding (`%3F`, `%23`, `%2F`); the service decodes
 those back before it looks the exchange up.
 
+A Data Exchange collection is its own exchange container and is not the ACC project. The backend
+obtains it programmatically with `await client.GetCollectionIdAsync(projectId)` and uses the
+successful response's value as the collection ID before retrieving the exchange.
+
 ## Live demo
 
 The application is deployed to an Azure Web App. Here's how you can try it out:
@@ -35,13 +39,13 @@ The application is deployed to an Azure Web App. Here's how you can try it out:
 ### Extracting geometry from an exchange
 
 ```curl
-POST https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}
+POST https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{projectId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{projectId}}` | ACC project ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 | `force` | Optional query parameter. `true` discards whatever is stored and converts again | `?force=true` |
@@ -59,13 +63,13 @@ again over a `completed` conversion.
 ### Checking status of an extraction
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{projectId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{projectId}}` | ACC project ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
@@ -88,7 +92,7 @@ The endpoint will return JSON object with extraction metadata:
   "startedAt": "2026-09-10T12:00:01Z",   // When conversion work began; null until it does
   "updatedAt": "2026-09-10T12:04:12Z",   // Bumped at every step of the pipeline
   "completedAt": "2026-09-10T12:04:12Z", // When it finished or failed; null while running
-  "logUrl": "https://.../api/jobs/{collectionId}/{exchangeUrn}/log?secret=...",
+  "logUrl": "https://.../api/jobs/{projectId}/{exchangeUrn}/log?secret=...",
                           // The conversion log, readable in any state — including failed
   "artifacts": [          // Generated artifacts, described rather than just named
     {
@@ -97,14 +101,14 @@ The endpoint will return JSON object with extraction metadata:
       "contentType": "model/vnd.usdz+zip",
       "size": 184320000,  // bytes, so a client can show real download progress
       "checksum": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-      "url": "https://.../api/jobs/{collectionId}/{exchangeUrn}/artifacts/foo.usdz?secret=..."
+      "url": "https://.../api/jobs/{projectId}/{exchangeUrn}/artifacts/foo.usdz?secret=..."
                           // Presigned — needs no Authorization header
     }
   ]
 }
 ```
 
-A collection ID or exchange URN the token cannot read is answered with `403 Forbidden` on every
+A project ID or exchange URN the token cannot read is answered with `403 Forbidden` on every
 endpoint, whether the exchange does not exist or the token simply has no access to it. A URL with
 the wrong number of path segments matches no endpoint at all and is answered with `404 Not Found`.
 
@@ -174,13 +178,13 @@ megabyte USDZ means materialising the entire package in memory first.
 ### Fetching an extraction artifact
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}/artifacts/{{ArtifactFileName}}
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{projectId}}/{{exchangeUrn}}/artifacts/{{ArtifactFileName}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{projectId}}` | ACC project ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{ArtifactFileName}}` | Name of the artifact file to fetch | `foo.obj` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
@@ -194,13 +198,13 @@ the presigning `secret` next to it — lives in the same folder but is not reach
 ### Fetching the conversion log
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}/log
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{projectId}}/{{exchangeUrn}}/log
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{projectId}}` | ACC project ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
@@ -218,13 +222,13 @@ are meaningless until it stops. It is readable whatever state the job is in — 
 > Note: this will only remove the extracted geometry, not the data exchange itself.
 
 ```curl
-DELETE https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{collectionId}}/{{exchangeUrn}}
+DELETE https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{projectId}}/{{exchangeUrn}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{collectionId}}` | Collection ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{projectId}}` | ACC project ID, as described under [Addressing a job](#addressing-a-job) | `b.12345678-abcd-1234-abcd-1234567890ab` |
 | `{{exchangeUrn}}` | Exchange URN, as described under [Addressing a job](#addressing-a-job) | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 

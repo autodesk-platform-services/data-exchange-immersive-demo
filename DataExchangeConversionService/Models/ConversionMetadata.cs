@@ -59,4 +59,4 @@ public static class ConversionStatus
 
 // An exchange as the service currently sees it: the job that addresses it, plus the version its
 // contents would be converted from right now.
-public sealed record ExchangeIdentity(JobId Job, string? FileVersionUrn);
+public sealed record ExchangeIdentity(JobId Job, string? CollectionId, string? FileVersionUrn);

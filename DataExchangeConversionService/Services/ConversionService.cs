@@ -53,14 +53,25 @@ public sealed class ConversionService
     {
         try
         {
-            var detailsResponse = await CreateClient(bearerToken)
-                .GetExchangeDetailsAsync(job.CollectionId, job.ExchangeUrn);
+            var client = CreateClient(bearerToken);
+            var collectionResponse = await client.GetCollectionIdAsync(job.ProjectId);
+            if (!collectionResponse.IsSuccess)
+            {
+                _logger.LogWarning(
+                    "Data Exchange SDK could not resolve the collection for project {ProjectId}: {Errors}",
+                    job.ProjectId,
+                    string.Join("; ", collectionResponse.Errors));
+                return null;
+            }
+
+            var collectionId = collectionResponse.Value;
+            var detailsResponse = await client.GetExchangeDetailsAsync(collectionId, job.ExchangeUrn);
             if (!detailsResponse.IsSuccess)
             {
                 _logger.LogWarning(
                     "Data Exchange SDK could not resolve exchange {ExchangeUrn} in collection {CollectionId}: {Errors}",
                     job.ExchangeUrn,
-                    job.CollectionId,
+                    collectionId,
                     string.Join("; ", detailsResponse.Errors));
                 return null;
             }
@@ -68,15 +79,15 @@ public sealed class ConversionService
             var details = detailsResponse.Value;
             return string.IsNullOrWhiteSpace(details.ExchangeID)
                 ? null
-                : new ExchangeIdentity(job, details.FileVersionUrn);
+                : new ExchangeIdentity(job, collectionId, details.FileVersionUrn);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Data Exchange SDK failed to resolve exchange {ExchangeUrn} in collection {CollectionId}.",
+                "Data Exchange SDK failed to resolve exchange {ExchangeUrn} in project {ProjectId}.",
                 job.ExchangeUrn,
-                job.CollectionId);
+                job.ProjectId);
             return null;
         }
     }
@@ -182,7 +193,7 @@ public sealed class ConversionService
             UpdatedAt = now
         };
         WriteMetadata(outputFolder, metadata);
-        _ = Task.Run(() => RunObjConversionAsync(exchange.Job, bearerToken, outputFolder, metadata));
+        _ = Task.Run(() => RunObjConversionAsync(exchange, bearerToken, outputFolder, metadata));
         return metadata;
     }
 
@@ -295,11 +306,12 @@ public sealed class ConversionService
     }
 
     private async Task RunObjConversionAsync(
-        JobId job,
+        ExchangeIdentity exchange,
         string bearerToken,
         string outputFolder,
         ConversionMetadata metadata)
     {
+        var job = exchange.Job;
         var logPath = Path.Combine(outputFolder, LogFileName);
 
         // Track the step so a failure anywhere along the pipeline can be pinpointed from the logs
@@ -335,7 +347,7 @@ public sealed class ConversionService
             var client = CreateClient(bearerToken);
 
             Step(ConversionSteps.FetchingDetails, "fetching exchange details");
-            var detailsResponse = await client.GetExchangeDetailsAsync(job.CollectionId, job.ExchangeUrn);
+            var detailsResponse = await client.GetExchangeDetailsAsync(exchange.CollectionId!, job.ExchangeUrn);
             if (!detailsResponse.IsSuccess)
             {
                 throw new InvalidOperationException(
@@ -560,7 +572,7 @@ public sealed class ConversionService
         return Path.Combine(outputFolder, CreateCacheKey(job));
     }
 
-    // The job's folder name: a hex SHA-256 of the collection ID and exchange URN together. An
+    // The job's folder name: a hex SHA-256 of the project ID and exchange URN together. An
     // exchange URN cannot be a folder name as it stands — ':' is not legal in a Windows path — and
     // a digest is a constant 64 characters, so a long URN cannot push the artifact paths towards
     // the Windows path length limit either. Derived from the canonical pair rather than from the
