@@ -15,7 +15,6 @@
 
 	<ItemGroup>
 		<PackageReference Include="Autodesk.DataExchange" Version="8.0.0" />
-		<PackageReference Include="Autodesk.DataExchange.GeometryDefinitions" Version="0.9.3" />
 		<PackageReference Include="SharpGLTF.Toolkit" Version="1.0.6" />
 	</ItemGroup>
 
