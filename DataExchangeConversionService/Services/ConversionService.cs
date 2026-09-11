@@ -14,6 +14,11 @@ public sealed class ConversionService
 {
     private const string MetadataFileName = "metadata.json";
     private const string LogFileName = "log.txt";
+    private const string SecretFileName = "secret";
+
+    // Files that live in a job's folder but are not artifacts. Serving either would hand a caller
+    // the job's own bookkeeping — and in the secret's case, the capability that protects it.
+    private static readonly string[] ReservedFileNames = [MetadataFileName, SecretFileName];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new Iso8601UtcConverter() }
@@ -110,6 +115,16 @@ public sealed class ConversionService
         var logPath = Path.Combine(outputFolder, LogFileName);
         File.WriteAllText(logPath, string.Empty);
 
+        // The capability that presigned artifact URLs carry. Minted per conversion, so deleting
+        // the job — or superseding it, which deletes the folder — revokes every URL handed out
+        // for it. 256 bits from a cryptographic RNG: it is guessed or it is not usable.
+        File.WriteAllText(
+            Path.Combine(outputFolder, SecretFileName),
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_'));
+
         var now = DateTimeOffset.UtcNow;
         var metadata = new ConversionMetadata
         {
@@ -130,6 +145,42 @@ public sealed class ConversionService
         DeleteFolderIfExists(GetJobOutputFolder(job));
     }
 
+    // The job's presigning secret, or null when there is no job on disk.
+    public string? GetJobSecret(JobId job)
+    {
+        var secretPath = Path.Combine(GetJobOutputFolder(job), SecretFileName);
+        return File.Exists(secretPath) ? File.ReadAllText(secretPath) : null;
+    }
+
+    // Whether a presented secret is the one this job was issued.
+    public bool IsJobSecretValid(JobId job, string presented)
+    {
+        var secret = GetJobSecret(job);
+        if (secret is null)
+        {
+            return false;
+        }
+
+        // Compared without a timing signal, so a caller cannot learn the secret one character at
+        // a time by measuring how long a rejection takes.
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(secret),
+            Encoding.UTF8.GetBytes(presented));
+    }
+
+    // An artifact fetched with a presigned URL, whose secret the caller has already presented.
+    //
+    // Unlike the bearer-token path this does not check that the conversion is still of the
+    // exchange's current version — with no token there is no way to ask the Data Exchange service
+    // what that version is. A presigned URL therefore points at the artifact of a specific
+    // conversion, and keeps working until that conversion is deleted or replaced. The status
+    // endpoint that hands the URL out is still version-gated, so a client following a fresh URL
+    // never receives stale bytes; only a client holding on to an old URL does.
+    public Artifact? GetPresignedArtifact(JobId job, string artifactName)
+    {
+        return ResolveArtifactFile(GetJobOutputFolder(job), artifactName);
+    }
+
     public Artifact? GetArtifact(ExchangeIdentity exchange, string artifactName)
     {
         // Gated the same way as the status, so an artifact left over from a superseded version is
@@ -139,8 +190,22 @@ public sealed class ConversionService
             return null;
         }
 
+        return ResolveArtifactFile(GetJobOutputFolder(exchange.Job), artifactName);
+    }
+
+    private static Artifact? ResolveArtifactFile(string outputFolder, string artifactName)
+    {
         // GetFileName strips any directory parts, so the lookup stays inside the output folder.
-        var artifactPath = Path.Combine(GetJobOutputFolder(exchange.Job), Path.GetFileName(artifactName));
+        var fileName = Path.GetFileName(artifactName);
+
+        // The job's own bookkeeping is not downloadable. Without this, `metadata.json` — and the
+        // presigning secret next to it — would resolve like any other file in the folder.
+        if (ReservedFileNames.Contains(fileName, StringComparer.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var artifactPath = Path.Combine(outputFolder, fileName);
         if (!File.Exists(artifactPath))
         {
             return null;

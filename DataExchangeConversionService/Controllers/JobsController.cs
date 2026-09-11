@@ -29,7 +29,10 @@ public sealed class JobsController : ControllerBase
         if (failure is not null) { return failure; }
 
         var status = _conversionService.GetStatus(exchange);
-        return status is null ? NotFound() : Ok(status);
+        if (status is null) { return NotFound(); }
+
+        AddPresignedArtifactUrls(exchange, status);
+        return Ok(status);
     }
 
     // Starts a new conversion and returns immediately while it runs in the background.
@@ -67,19 +70,59 @@ public sealed class JobsController : ControllerBase
     }
 
     // Returns a single artifact produced by a conversion (e.g. the generated USDZ package).
+    //
+    // Authorized either by the usual bearer token, or by the `secret` query parameter carried by
+    // the presigned URLs in a status response — which is the only way to hand these bytes to
+    // something that cannot send an Authorization header, such as a <model-viewer> `src`.
     [HttpGet("{jobId}/artifacts/{artifact}")]
     [Produces("model/obj", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
-    public async Task<IActionResult> GetArtifact(string jobId, string artifact)
+    public async Task<IActionResult> GetArtifact(string jobId, string artifact, [FromQuery] string? secret)
     {
+        if (!string.IsNullOrEmpty(secret))
+        {
+            if (!JobId.TryParse(jobId, out var presignedJob)) { return MalformedJobId(); }
+
+            // A wrong secret is a 404 rather than a 403: a caller holding an unusable URL learns
+            // nothing about whether the job behind it exists.
+            if (!_conversionService.IsJobSecretValid(presignedJob, secret)) { return NotFound(); }
+
+            var presignedFile = _conversionService.GetPresignedArtifact(presignedJob, artifact);
+            return presignedFile is null ? NotFound() : StreamArtifact(presignedFile, asAttachment: false);
+        }
+
         var (failure, exchange) = await ResolveJobAsync(jobId);
         if (failure is not null) { return failure; }
 
         var file = _conversionService.GetArtifact(exchange, artifact);
-        if (file is null) { return NotFound(); }
+        return file is null ? NotFound() : StreamArtifact(file, asAttachment: true);
+    }
 
-        // Streams from disk, and range processing lets a client resume an interrupted USDZ
-        // download or tail the growing conversion log instead of refetching it whole.
-        return PhysicalFile(file.Path, file.ContentType, file.FileName, enableRangeProcessing: true);
+    // Streams from disk, and range processing lets a client resume an interrupted USDZ download or
+    // tail the growing conversion log instead of refetching it whole.
+    //
+    // A presigned URL exists to be embedded in something that renders it, so it is served inline;
+    // passing a file name would set `Content-Disposition: attachment`, which is the right answer
+    // for a deliberate download over the bearer-token path but not for a <model> `src`.
+    private IActionResult StreamArtifact(Artifact file, bool asAttachment)
+    {
+        return asAttachment
+            ? PhysicalFile(file.Path, file.ContentType, file.FileName, enableRangeProcessing: true)
+            : PhysicalFile(file.Path, file.ContentType, enableRangeProcessing: true);
+    }
+
+    // Gives every artifact an absolute URL carrying the job's secret, so a client never has to
+    // build one — and so the only place the secret appears is a response the caller had to be
+    // authorized to read.
+    private void AddPresignedArtifactUrls(ExchangeIdentity exchange, ConversionMetadata status)
+    {
+        var secret = _conversionService.GetJobSecret(exchange.Job);
+        if (secret is null) { return; }
+
+        var prefix = $"{Request.Scheme}://{Request.Host}/api/jobs/{exchange.Job.Value}/artifacts/";
+        foreach (var artifact in status.Artifacts)
+        {
+            artifact.Url = $"{prefix}{Uri.EscapeDataString(artifact.Name)}?secret={Uri.EscapeDataString(secret)}";
+        }
     }
 
     // Decodes the job ID, checks that the request carries a bearer token with access to the
@@ -91,12 +134,7 @@ public sealed class JobsController : ControllerBase
     {
         if (!JobId.TryParse(jobId, out var job))
         {
-            return (BadRequest(new ProblemDetails
-            {
-                Title = "Malformed job ID",
-                Detail = "A job ID is the base64url encoding of '{collectionId}|{exchangeUrn}'.",
-                Status = StatusCodes.Status400BadRequest
-            }), new ExchangeIdentity(new JobId(string.Empty, string.Empty), null));
+            return (MalformedJobId(), new ExchangeIdentity(new JobId(string.Empty, string.Empty), null));
         }
 
         var unresolved = new ExchangeIdentity(job, null);
@@ -122,6 +160,16 @@ public sealed class JobsController : ControllerBase
         }
 
         return (null, exchange);
+    }
+
+    private IActionResult MalformedJobId()
+    {
+        return BadRequest(new ProblemDetails
+        {
+            Title = "Malformed job ID",
+            Detail = "A job ID is the base64url encoding of '{collectionId}|{exchangeUrn}'.",
+            Status = StatusCodes.Status400BadRequest
+        });
     }
 
     private bool TryGetBearerToken(out string bearerToken)

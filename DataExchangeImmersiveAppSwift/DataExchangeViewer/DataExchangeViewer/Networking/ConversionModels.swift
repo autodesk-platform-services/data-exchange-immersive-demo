@@ -22,6 +22,10 @@ struct ConversionArtifact: Decodable, Equatable {
     let contentType: String
     let size: Int64
     let checksum: String?
+    /// Absolute URL carrying the job's secret, so it needs no `Authorization` header. Absent for a
+    /// conversion produced by an older build of the service, which is why callers fall back to the
+    /// authenticated artifact endpoint.
+    let url: String?
 }
 
 struct ConversionMetadata: Decodable {

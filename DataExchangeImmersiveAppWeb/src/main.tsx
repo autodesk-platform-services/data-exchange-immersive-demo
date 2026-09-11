@@ -5,7 +5,6 @@ import { getExchanges, getHubs, getProjects, type Exchange, type Hub, type Proje
 import {
   conversionDuration,
   deleteConversion,
-  fetchArtifactBlob,
   fetchArtifactText,
   findArtifact,
   getStatus,
@@ -298,60 +297,49 @@ function ViewerTab({ token, exchange }: { token: string; exchange: Exchange }) {
 // GLB / USDZ tabs: rendered from converted artifacts
 // ---------------------------------------------------------------------------
 
+// The artifact is rendered from its presigned URL rather than from a blob.
+//
+// The `src` attributes of <model-viewer> and <model> cannot send an Authorization header, so this
+// used to fetch the whole artifact with the bearer token and hand over an object URL — which meant
+// a several-hundred-megabyte USDZ was materialised in the tab's memory before anything was drawn.
+// The presigned URL carries its own authorization, so the element streams the bytes itself.
 function ArtifactTab({
-  token,
-  urn,
-  collectionId,
   status,
   type,
   render,
 }: {
-  token: string;
-  urn: string;
-  collectionId: string;
   status: ConversionStatus | null | undefined;
   type: ConversionArtifact["type"];
-  render: (blobUrl: string) => React.ReactNode;
+  render: (url: string) => React.ReactNode;
 }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const artifact = findArtifact(status, type);
-  const fileName = artifact?.name;
-
-  useEffect(() => {
-    if (!fileName) {
-      setBlobUrl(null);
-      return;
-    }
-    let revoked: string | null = null;
-    fetchArtifactBlob(token, urn, collectionId, fileName).then((url) => {
-      revoked = url;
-      setBlobUrl(url);
-    });
-    // Revoke the previous object URL when the artifact or exchange changes, to avoid leaks.
-    return () => {
-      if (revoked) URL.revokeObjectURL(revoked);
-    };
-  }, [token, urn, collectionId, fileName]);
 
   if (status?.status !== "completed") {
     return <div className="tab-body placeholder">Run a conversion to view the {type} artifact.</div>;
   }
-  if (!artifact || !fileName) {
+  if (!artifact) {
     return <div className="tab-body placeholder">No {type} artifact was produced.</div>;
   }
-  if (!blobUrl) {
+  if (!artifact.url) {
     return (
       <div className="tab-body placeholder">
-        Loading {type} ({formatBytes(artifact.size)})…
+        This conversion predates presigned artifact URLs. Re-run it to view the {type} artifact.
       </div>
     );
   }
   return (
     <div className="tab-body">
-      <a className="download-button" href={blobUrl} download={fileName} aria-label={`Download ${fileName}`}>
+      {/* Cross-origin, so the `download` attribute is advisory — the service serves presigned
+          artifacts inline and the browser saves what it cannot render. */}
+      <a
+        className="download-button"
+        href={artifact.url}
+        download={artifact.name}
+        aria-label={`Download ${artifact.name} (${formatBytes(artifact.size)})`}
+      >
         <DownloadIcon />
       </a>
-      {render(blobUrl)}
+      {render(artifact.url)}
     </div>
   );
 }
@@ -547,9 +535,6 @@ function MainPane({
       {tab === "viewer" && <ViewerTab token={token} exchange={exchange} />}
       {tab === "glb" && (
         <ArtifactTab
-          token={token}
-          urn={urn}
-          collectionId={collectionId}
           status={status}
           type="glb"
           render={(url) => (
@@ -559,9 +544,6 @@ function MainPane({
       )}
       {tab === "usdz" && (
         <ArtifactTab
-          token={token}
-          urn={urn}
-          collectionId={collectionId}
           status={status}
           type="usdz"
           render={(url) => (

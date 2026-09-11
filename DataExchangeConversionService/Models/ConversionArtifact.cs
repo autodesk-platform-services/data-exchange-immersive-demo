@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 
 namespace DataExchangeConversionService.Models;
 
@@ -25,6 +26,15 @@ public sealed class ConversionArtifact
     // "sha256:<lowercase hex>". Lets a client cache confirm that what it stored is what the
     // service sent, and tell two conversions of the same exchange apart by content.
     public string? Checksum { get; set; }
+
+    // Absolute, presigned URL for the bytes — carries the job's secret, so it needs no
+    // Authorization header and can be handed straight to something that cannot send one.
+    //
+    // Filled in per request by JobsController, because only the request knows the scheme and host
+    // to build an absolute URL from. Not persisted: it is omitted when null, so metadata.json
+    // carries no `url` key at all.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Url { get; set; }
 
     // Describes a file that has been fully written. Called at the point each artifact is
     // finalised, so the size and digest describe the finished file rather than a partial one.

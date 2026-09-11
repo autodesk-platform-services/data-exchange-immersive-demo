@@ -12,7 +12,14 @@ import Foundation
 @Suite("Conversion state")
 struct ConversionStateTests {
     private func artifact(name: String, type: String, size: Int64 = 0) -> ConversionArtifact {
-        ConversionArtifact(name: name, type: type, contentType: "application/octet-stream", size: size, checksum: nil)
+        ConversionArtifact(
+            name: name,
+            type: type,
+            contentType: "application/octet-stream",
+            size: size,
+            checksum: nil,
+            url: nil
+        )
     }
 
     private func metadata(
@@ -45,7 +52,8 @@ struct ConversionStateTests {
               "type": "usdz",
               "contentType": "model/vnd.usdz+zip",
               "size": 184320000,
-              "checksum": "sha256:abc"
+              "checksum": "sha256:abc",
+              "url": "https://example.test/api/jobs/abc/artifacts/model.usdz?secret=s3cr3t"
             },
             { "name": "log.txt", "type": "log", "contentType": "text/plain", "size": 512, "checksum": null }
           ],
@@ -58,6 +66,9 @@ struct ConversionStateTests {
         #expect(metadata.artifacts.first?.size == 184_320_000)
         #expect(metadata.artifacts.first?.contentType == "model/vnd.usdz+zip")
         #expect(metadata.artifacts.first?.checksum == "sha256:abc")
+        #expect(metadata.artifacts.first?.url == "https://example.test/api/jobs/abc/artifacts/model.usdz?secret=s3cr3t")
+        // Absent for a conversion made before the service issued presigned URLs.
+        #expect(metadata.artifacts.last?.url == nil)
         #expect(metadata.artifacts.last?.checksum == nil)
         #expect(metadata.error == nil)
     }

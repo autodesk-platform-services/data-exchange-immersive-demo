@@ -77,7 +77,9 @@ The endpoint will return JSON object with extraction metadata:
       "type": "usdz",     // "obj" | "mtl" | "glb" | "usdz" | "log" | "unknown"
       "contentType": "model/vnd.usdz+zip",
       "size": 184320000,  // bytes, so a client can show real download progress
-      "checksum": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      "checksum": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "url": "https://.../api/jobs/{jobId}/artifacts/foo.usdz?secret=..."
+                          // Presigned — needs no Authorization header
     }
   ]
 }
@@ -95,6 +97,27 @@ task does not survive a restart of the service, but the metadata it left behind 
 
 The endpoint returns `404 Not Found` when there is no conversion for the exchange — *including* when the only stored conversion was produced from a version the exchange has since moved past. An exchange's lineage URN doesn't change when a new version is published, but its contents do, so a stale conversion is reported as absent rather than as the current one. Requesting a new conversion (`POST`) discards the superseded artifacts and converts the current version; artifact fetches are gated the same way, so a stale USDZ is never served.
 
+### Presigned artifact URLs
+
+Every artifact in a status response carries a `url` with a `secret` query parameter. Requests to it
+need no `Authorization` header, which is the only way to hand these bytes to something that cannot
+send one — a `<model-viewer>` or `<model>` `src`, or a `QLPreviewController`. Without it a client
+has to fetch the whole artifact itself and pass along an object URL, which for a several-hundred-
+megabyte USDZ means materialising the entire package in memory first.
+
+- The secret is 256 bits from a cryptographic RNG, minted per conversion, and appears only in a
+  status response — which the caller had to present a valid bearer token to read.
+- It is revoked when the conversion is deleted or replaced, since it lives in the job's folder.
+- It does **not** expire on its own, and query strings are commonly recorded in server and proxy
+  access logs. Treat a presigned URL as a bearer credential for that one conversion's artifacts.
+- Presigned responses are served inline; the bearer-token route still sets
+  `Content-Disposition: attachment`.
+- Unlike the bearer-token route, the presigned route does not check that the conversion is still of
+  the exchange's current version — with no token there is no way to ask the Data Exchange service
+  what that version is. A presigned URL points at the artifacts of one specific conversion. The
+  status endpoint that hands it out is still version-gated, so a client following a fresh URL never
+  receives stale bytes; only a client holding on to an old one does.
+
 ### Fetching an extraction artifact
 
 ```curl
@@ -108,7 +131,10 @@ Authorization: Bearer {{AccessToken}}
 | `{{ArtifactFileName}}` | Name of the artifact file to fetch | `foo.obj` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
-The endpoint will return the raw bytes of the requested artifact file, with the appropriate `Content-Type` header set.
+The endpoint will return the raw bytes of the requested artifact file, with the appropriate `Content-Type` header set. Pass `?secret=...` instead of the `Authorization` header to use a [presigned URL](#presigned-artifact-urls).
+
+The job's own bookkeeping (`metadata.json`, `secret`) is not downloadable through this endpoint,
+even though both files live in the same folder as the artifacts.
 
 ### Deleting extracted geometry
 

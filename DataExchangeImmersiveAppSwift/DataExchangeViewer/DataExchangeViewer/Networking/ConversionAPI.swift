@@ -87,14 +87,22 @@ struct ConversionAPI {
     /// `onProgress` receives the bytes written so far and the total the service declared, when it
     /// declared one. It is called on `URLSession`'s delegate queue rather than the main actor.
     func downloadArtifact(
+        artifact: ConversionArtifact,
         urn: String,
         collectionId: String,
-        fileName: String,
         token: String,
         onProgress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }
     ) async throws -> URL {
-        var request = URLRequest(url: artifactEndpoint(urn: urn, collectionId: collectionId, fileName: fileName))
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // The presigned URL carries its own authorization, so following it skips the bearer-token
+        // path on the service — and with it the Data Exchange round trip that path performs on
+        // every artifact request just to authorize one.
+        let presigned = artifact.url.flatMap(URL.init(string:))
+        var request = URLRequest(
+            url: presigned ?? artifactEndpoint(urn: urn, collectionId: collectionId, fileName: artifact.name)
+        )
+        if presigned == nil {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         // Held in a local so the delegate outlives the call regardless of how strongly
         // `URLSessionTask` happens to reference it.
         let progress = DownloadProgressDelegate(onProgress: onProgress)

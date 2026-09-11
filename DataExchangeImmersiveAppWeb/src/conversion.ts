@@ -19,6 +19,10 @@ export interface ConversionArtifact {
   contentType: string;
   size: number;
   checksum?: string | null;
+  // Absolute URL carrying the job's secret, so it needs no Authorization header and can be given
+  // straight to a `src` attribute. Absent only for a conversion produced by an older build of the
+  // service, which is why callers still fall back to an authenticated fetch.
+  url?: string | null;
 }
 
 export interface ConversionStatus {
@@ -107,18 +111,6 @@ async function fetchArtifact(token: string, urn: string, collectionId: string, f
     throw new Error(`Failed to fetch artifact ${fileName}: ${response.status}`);
   }
   return response;
-}
-
-// Downloads a single artifact and returns an object URL. The <model-viewer>/<model> `src`
-// attributes cannot send an Authorization header, so we fetch the bytes here and hand the
-// elements a blob URL instead. Callers must revokeObjectUrl() the result when done.
-export async function fetchArtifactBlob(
-  token: string,
-  urn: string,
-  collectionId: string,
-  fileName: string,
-): Promise<string> {
-  return URL.createObjectURL(await (await fetchArtifact(token, urn, collectionId, fileName)).blob());
 }
 
 // Downloads a text artifact (e.g. log.txt) and returns its contents as a string.

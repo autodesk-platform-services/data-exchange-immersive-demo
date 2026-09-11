@@ -267,9 +267,9 @@ final class ConversionStore {
             // to the URLSession task and is released with it, so it can neither outlive the
             // download nor form a cycle — the store never holds the delegate.
             let downloaded = try await api.downloadArtifact(
+                artifact: artifact,
                 urn: exchange.exchangeUrn,
                 collectionId: exchange.collectionId,
-                fileName: artifact.name,
                 token: token
             ) { [store = self] received, total in
                 // Delivered on URLSession's delegate queue, so this hops back to the actor that
