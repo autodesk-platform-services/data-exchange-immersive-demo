@@ -170,6 +170,15 @@ struct USDzPreviewView: View {
                 Text(message)
             }
 
+        // Says which of the two it is, because the service now distinguishes them: an exchange
+        // nobody has converted, and one whose conversion a new publish has just invalidated.
+        case .superseded:
+            ContentUnavailableView {
+                Label("A newer version was published", systemImage: "arrow.trianglehead.2.clockwise")
+            } description: {
+                Text("The converted model describes an earlier version of this exchange. Convert again to preview the current one.")
+            }
+
         // `.completed` without a file URL isn't reachable today (the store publishes the URL before
         // the state), but it falls back to the actionable message rather than a spinner.
         case .notConverted, .completed:

@@ -11,6 +11,10 @@ enum ConversionState {
     case running(ConversionActivity)
     case completed
     case failed(String)
+    /// A conversion exists, but of a version the exchange has since moved past. Distinct from
+    /// `notConverted` because the person is told a *newer version was published* rather than that
+    /// nothing was ever converted — the service used to report both as a 404.
+    case superseded
 }
 
 /// What the app is waiting on while a conversion is in flight, so the UI can show something
@@ -118,6 +122,12 @@ final class ConversionStore {
                     startPolling(auth: auth)
                 case .failed:
                     state = .failed(metadata.error ?? "The conversion failed on the service.")
+                case .superseded:
+                    // The cached file was produced from the version that has just been superseded,
+                    // so it would preview last week's geometry behind a "ready" badge.
+                    cache.delete(for: exchange.cacheKeyUrn)
+                    cachedUSDzURL = nil
+                    state = .superseded
                 }
             } else {
                 state = .notConverted
@@ -210,10 +220,11 @@ final class ConversionStore {
                 collectionId: exchange.collectionId,
                 token: token
             ) else {
-                // The service no longer has a conversion for this exchange: another client
-                // deleted it, or a new version of the exchange was published and superseded it.
-                // Either way there is nothing left to wait for, and polling to the deadline
-                // would just spend half an hour on a conversion that is gone.
+                // The service no longer has a conversion for this exchange, which now means only
+                // one thing: another client deleted it. A conversion invalidated by a newly
+                // published version arrives as `.superseded` instead of as a 404. Either way
+                // there is nothing left to wait for, and polling to the deadline would just spend
+                // half an hour on a conversion that is gone.
                 state = .notConverted
                 return false
             }
@@ -223,6 +234,11 @@ final class ConversionStore {
                 return false
             case .failed:
                 state = .failed(metadata.error ?? "The conversion failed on the service.")
+                return false
+            case .superseded:
+                // A new version was published while this conversion was running, so what it is
+                // producing is already out of date. Nothing left to wait for.
+                state = .superseded
                 return false
             case .running:
                 // The first POST answers 202 with no body, so the wait starts out measured from

@@ -26,9 +26,16 @@ export interface ConversionArtifact {
 }
 
 export interface ConversionStatus {
-  status: "running" | "completed" | "failed";
+  // "superseded" means the conversion finished, but of a version the exchange has since moved past:
+  // its artifacts are not served and a new conversion is what resolves it. Previously reported as a
+  // 404, indistinguishable from an exchange nobody had ever converted.
+  status: "running" | "completed" | "failed" | "superseded";
   artifacts: ConversionArtifact[];
   error?: string | null;
+  // The version the artifacts were produced from, and — when superseded — the version the exchange
+  // is at now.
+  fileVersionUrn?: string | null;
+  currentFileVersionUrn?: string | null;
   // ISO 8601, UTC, second resolution (e.g. "2026-09-10T12:04:12Z"). `updatedAt` advances at every
   // step of the pipeline, so a `running` job whose `updatedAt` has stopped moving is one whose
   // conversion process is gone.

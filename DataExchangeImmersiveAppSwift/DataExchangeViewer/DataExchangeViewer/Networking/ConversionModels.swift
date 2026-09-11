@@ -9,6 +9,9 @@ enum ConversionStatusValue: String, Codable {
     case running
     case completed
     case failed
+    /// Converted, but from a version the exchange has since moved past. The artifacts still exist
+    /// on the service and are not served; a new conversion is what resolves it.
+    case superseded
 }
 
 /// One file produced by a conversion.
@@ -32,6 +35,11 @@ struct ConversionMetadata: Decodable {
     let status: ConversionStatusValue
     let artifacts: [ConversionArtifact]
     let error: String?
+
+    /// The exchange version these artifacts were produced from.
+    let fileVersionUrn: String?
+    /// The version the exchange is at now. Present only when `status` is `.superseded`.
+    let currentFileVersionUrn: String?
 
     /// When the service accepted the job.
     let createdAt: Date?

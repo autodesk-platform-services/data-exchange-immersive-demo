@@ -74,6 +74,14 @@ public sealed class ConversionService
         }
     }
 
+    // The stored conversion for a job, or null when there is none.
+    //
+    // A conversion produced from an earlier version of the exchange is reported as "superseded"
+    // rather than as absent. It used to be reported as a 404 — indistinguishable from an exchange
+    // nobody had ever converted — which left a client unable to say why the artifacts it had a
+    // moment ago were gone. The visionOS store carried a comment listing the two causes it could
+    // not tell apart. Its artifacts are still not served; the difference is only that the client
+    // is now told which case it is in, and against which version.
     public ConversionMetadata? GetStatus(ExchangeIdentity exchange)
     {
         var metadata = ReadMetadata(GetJobOutputFolder(exchange.Job));
@@ -82,11 +90,21 @@ public sealed class ConversionService
             return null;
         }
 
-        // A conversion produced from an earlier version of the exchange is not a conversion of
-        // what the exchange contains now. Reporting it as present is how a client ends up
-        // previewing last week's geometry and being told it is current, so it is reported as
-        // absent instead and re-converted on request.
-        return IsCurrent(metadata, exchange) ? metadata : null;
+        if (!IsCurrent(metadata, exchange))
+        {
+            metadata.Status = ConversionStatus.Superseded;
+            metadata.CurrentFileVersionUrn = exchange.FileVersionUrn;
+        }
+
+        return metadata;
+    }
+
+    // Whether a stored conversion is one whose artifacts describe the exchange as it is now.
+    // Anything else — no conversion at all, or one of a version that has been superseded — means
+    // the job has to be run again before there is anything worth serving.
+    public static bool IsUsable(ConversionMetadata? metadata)
+    {
+        return metadata is not null && metadata.Status != ConversionStatus.Superseded;
     }
 
     public void StartObjConversion(ExchangeIdentity exchange, string bearerToken)
@@ -94,7 +112,7 @@ public sealed class ConversionService
         var outputFolder = GetJobOutputFolder(exchange.Job);
         if (Directory.Exists(outputFolder))
         {
-            if (GetStatus(exchange) is not null)
+            if (IsUsable(GetStatus(exchange)))
             {
                 throw new InvalidOperationException($"Conversion already in progress for exchange {exchange.Job.ExchangeUrn}. Delete the current conversion first if you want to start it again.");
             }
@@ -185,7 +203,7 @@ public sealed class ConversionService
     {
         // Gated the same way as the status, so an artifact left over from a superseded version is
         // never served — not even to a client that asks for it by name.
-        if (GetStatus(exchange) is null)
+        if (!IsUsable(GetStatus(exchange)))
         {
             return null;
         }

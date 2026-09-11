@@ -314,6 +314,13 @@ function ArtifactTab({
 }) {
   const artifact = findArtifact(status, type);
 
+  if (status?.status === "superseded") {
+    return (
+      <div className="tab-body placeholder">
+        A newer version of this exchange was published. Convert again to view the {type} artifact.
+      </div>
+    );
+  }
   if (status?.status !== "completed") {
     return <div className="tab-body placeholder">Run a conversion to view the {type} artifact.</div>;
   }
@@ -379,7 +386,8 @@ function LogsTab({
   // `status` is a fresh object on every poll (see MainPane), so this effect re-fetches the log
   // on the same 3s cadence as the status poll while running, and once more when it settles.
   useEffect(() => {
-    if (!status) return;
+    // A superseded conversion's artifacts are not served, so its log would only 404.
+    if (!status || status.status === "superseded") return;
     let cancelled = false;
     fetchArtifactText(token, urn, collectionId, "log.txt").then(
       (contents) => {
@@ -397,7 +405,7 @@ function LogsTab({
     };
   }, [token, urn, collectionId, status]);
 
-  if (!status) {
+  if (!status || status.status === "superseded") {
     return <div className="tab-body placeholder">Run a conversion to view logs.</div>;
   }
   if (error && !text) {
@@ -506,11 +514,13 @@ function MainPane({
           {status && <span className={`status ${status.status}`}>{status.status}</span>}
           {status && <ConversionDuration status={status} />}
           {status?.error && <span className="error">{status.error}</span>}
-          {status ? (
+          {status && status.status !== "superseded" ? (
             <button className="secondary" onClick={() => void remove()} disabled={status.status === "running"}>
               {status.status === "running" ? "Converting…" : "Clear"}
             </button>
           ) : (
+            // A superseded conversion needs the same action as a missing one: convert again.
+            // Starting one is not a conflict in that state, so no Clear is needed first.
             <button onClick={() => void convert()} disabled={status === undefined}>
               Convert
             </button>

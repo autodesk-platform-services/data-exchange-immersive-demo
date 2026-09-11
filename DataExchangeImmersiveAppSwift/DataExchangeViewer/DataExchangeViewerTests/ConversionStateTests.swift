@@ -33,6 +33,8 @@ struct ConversionStateTests {
             status: status,
             artifacts: artifacts,
             error: error,
+            fileVersionUrn: nil,
+            currentFileVersionUrn: nil,
             createdAt: createdAt,
             startedAt: startedAt,
             updatedAt: nil,
@@ -80,6 +82,24 @@ struct ConversionStateTests {
         let metadata = try JSONDecoder().decode(ConversionMetadata.self, from: Data(json.utf8))
         #expect(metadata.status == .failed)
         #expect(metadata.error == "Unsupported geometry")
+    }
+
+    /// A conversion of a version the exchange has moved past. Previously a 404, indistinguishable
+    /// from an exchange nobody had ever converted.
+    @Test func decodesASupersededConversion() throws {
+        let json = """
+        {
+          "status": "superseded",
+          "artifacts": [],
+          "error": null,
+          "fileVersionUrn": "urn:adsk.wipprod:fs.file:vf.abc?version=2",
+          "currentFileVersionUrn": "urn:adsk.wipprod:fs.file:vf.abc?version=3"
+        }
+        """
+        let metadata = try JSONDecoder.conversionService.decode(ConversionMetadata.self, from: Data(json.utf8))
+        #expect(metadata.status == .superseded)
+        #expect(metadata.fileVersionUrn == "urn:adsk.wipprod:fs.file:vf.abc?version=2")
+        #expect(metadata.currentFileVersionUrn == "urn:adsk.wipprod:fs.file:vf.abc?version=3")
     }
 
     /// A status the app doesn't know is a decoding failure rather than a silently mis-mapped

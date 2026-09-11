@@ -63,10 +63,12 @@ The endpoint will return JSON object with extraction metadata:
 
 ```jsonc
 {
-  "status": "completed",  // "running" | "completed" | "failed"
+  "status": "completed",  // "running" | "completed" | "failed" | "superseded"
   "error": null,          // Error message in case "status" is "failed"
   "fileVersionUrn": "urn:adsk.wipprod:fs.file:vf.lbJRla4QRhO-Xnu-1bEg5Q?version=3",
                           // The exchange version these artifacts were produced from
+  "currentFileVersionUrn": null,
+                          // Only when "status" is "superseded": the version the exchange is at now
   "createdAt": "2026-09-10T12:00:00Z",   // When the job was accepted
   "startedAt": "2026-09-10T12:00:01Z",   // When conversion work began; null until it does
   "updatedAt": "2026-09-10T12:04:12Z",   // Bumped at every step of the pipeline
@@ -95,7 +97,25 @@ every step of the pipeline, so it doubles as a liveness heartbeat: a job still r
 whose `updatedAt` has stopped advancing is one whose conversion process is gone — the background
 task does not survive a restart of the service, but the metadata it left behind does.
 
-The endpoint returns `404 Not Found` when there is no conversion for the exchange — *including* when the only stored conversion was produced from a version the exchange has since moved past. An exchange's lineage URN doesn't change when a new version is published, but its contents do, so a stale conversion is reported as absent rather than as the current one. Requesting a new conversion (`POST`) discards the superseded artifacts and converts the current version; artifact fetches are gated the same way, so a stale USDZ is never served.
+The endpoint returns `404 Not Found` when there is no conversion for the exchange.
+
+A conversion produced from a version the exchange has since moved past is reported with
+`"status": "superseded"` rather than as absent. An exchange's lineage URN doesn't change when a new
+version is published, but its contents do, so the stored artifacts no longer describe the exchange:
+
+- `fileVersionUrn` is the version they *were* produced from, `currentFileVersionUrn` the version the
+  exchange is at now.
+- The artifacts are not served — artifact fetches over the bearer route are gated the same way, so a
+  stale USDZ is never handed out — and they carry no `url`.
+- Requesting a new conversion (`POST`) is not a conflict in this state: it discards the superseded
+  artifacts and converts the current version.
+
+Reporting this as a 404 previously left a client unable to say why artifacts it had a moment ago
+were gone: an exchange nobody had ever converted and one whose conversion had just been invalidated
+looked identical.
+
+> A presigned artifact URL handed out before the conversion was superseded keeps working until the
+> conversion is replaced — see [Presigned artifact URLs](#presigned-artifact-urls).
 
 ### Presigned artifact URLs
 

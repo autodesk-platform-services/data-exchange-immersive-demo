@@ -436,6 +436,10 @@ button.pill-small {
   color: var(--dawn);
 }
 
+.status.superseded {
+  color: var(--dusk);
+}
+
 /* Sits next to the status chip; secondary to it, so it reads as a detail rather than a second
    piece of state. The gap comes from .conversion. */
 .duration {

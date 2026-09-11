@@ -20,8 +20,8 @@ public sealed class JobsController : ControllerBase
     }
 
     // Returns the conversion status and the artifacts available for a job. A conversion produced
-    // from a version the exchange has since moved past is reported as 404, the same as no
-    // conversion at all — see ConversionService.GetStatus.
+    // from a version the exchange has since moved past is reported with status "superseded" and
+    // carries no artifact URLs — see ConversionService.GetStatus.
     [HttpGet("{jobId}")]
     public async Task<IActionResult> GetStatus(string jobId)
     {
@@ -31,7 +31,13 @@ public sealed class JobsController : ControllerBase
         var status = _conversionService.GetStatus(exchange);
         if (status is null) { return NotFound(); }
 
-        AddPresignedArtifactUrls(exchange, status);
+        // A superseded conversion's artifacts are not served, so handing out URLs for them would
+        // only produce 404s.
+        if (ConversionService.IsUsable(status))
+        {
+            AddPresignedArtifactUrls(exchange, status);
+        }
+
         return Ok(status);
     }
 
@@ -43,7 +49,9 @@ public sealed class JobsController : ControllerBase
         if (failure is not null) { return failure; }
 
         TryGetBearerToken(out var bearerToken);
-        if (_conversionService.GetStatus(exchange) is not null)
+        // A superseded conversion is not a conflict — it is exactly the case a new conversion is
+        // for, and starting one replaces it.
+        if (ConversionService.IsUsable(_conversionService.GetStatus(exchange)))
         {
             return Conflict(new ProblemDetails
             {

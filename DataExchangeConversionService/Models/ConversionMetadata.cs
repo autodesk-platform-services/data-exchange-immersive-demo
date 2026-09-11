@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace DataExchangeConversionService.Models;
 
 // Persisted to metadata.json next to the generated artifacts.
@@ -25,12 +27,18 @@ public sealed class ConversionMetadata
     // When the job reached "completed" or "failed". Null while it is still running.
     public DateTimeOffset? CompletedAt { get; set; }
 
-    // The version of the exchange this conversion was produced from. Recorded so a conversion
-    // made from a superseded version is reported as absent rather than served as current: an
-    // exchange's contents change when a new version is published, but its lineage URN — the key
-    // everything here is stored under — does not. Null for a conversion written before this
-    // field existed, or for an exchange whose version the Data Exchange SDK does not report.
+    // The version of the exchange this conversion was produced from. An exchange's contents change
+    // when a new version is published, but its lineage URN — the key everything here is stored
+    // under — does not, so this is what decides whether the artifacts still describe the exchange.
+    // Null for a conversion written before this field existed, or for an exchange whose version the
+    // Data Exchange SDK does not report.
     public string? FileVersionUrn { get; set; }
+
+    // The version the exchange is at now, set only when this conversion has been superseded by a
+    // newer one. Filled in per request, not persisted — the answer changes whenever someone
+    // publishes, not when the conversion is written.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CurrentFileVersionUrn { get; set; }
 }
 
 public static class ConversionStatus
@@ -38,6 +46,11 @@ public static class ConversionStatus
     public const string Running = "running";
     public const string Completed = "completed";
     public const string Failed = "failed";
+
+    // The conversion finished, but of a version the exchange has since moved past. Its artifacts
+    // still exist and still describe what they were made from — they just no longer describe the
+    // exchange, so they are not served and a new conversion is needed.
+    public const string Superseded = "superseded";
 }
 
 // An exchange as the service currently sees it: the job that addresses it, plus the version its
