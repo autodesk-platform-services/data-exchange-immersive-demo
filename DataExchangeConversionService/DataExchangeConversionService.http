@@ -1,30 +1,32 @@
 #@DataExchangeViewingService_HostAddress = https://localhost:7008
 @DataExchangeViewingService_HostAddress = https://data-exchange-conversion-service.azurewebsites.net/
-@exchangeUrn = urn%3Aadsk.wipprod%3Adm.lineage%3A1-WkzyuRRv-v4ANzo1Kz1g
-@collectionId = b.12345678-abcd-1234-abcd-1234567890ab
+# Job ID = base64url("{collectionId}|{exchangeUrn}"), i.e. base64 with '-'/'_' for '+'/'/' and no
+# '=' padding. For collectionId "b.12345678-abcd-1234-abcd-1234567890ab" and exchangeUrn
+# "urn:adsk.wipprod:dm.lineage:1-WkzyuRRv-v4ANzo1Kz1g" that is:
+@jobId = Yi4xMjM0NTY3OC1hYmNkLTEyMzQtYWJjZC0xMjM0NTY3ODkwYWJ8dXJuOmFkc2sud2lwcHJvZDpkbS5saW5lYWdlOjEtV2t6eXVSUnYtdjRBTnpvMUt6MWc
 @AccessToken = ...
 
-### Start exchange conversion
-POST {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}
+### Start conversion job
+POST {{DataExchangeViewingService_HostAddress }}/api/jobs/{{jobId}}
 Authorization: Bearer {{AccessToken}}
 
-### Get exchange conversion status
-GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}
+### Get conversion job status
+GET {{DataExchangeViewingService_HostAddress }}/api/jobs/{{jobId}}
 Authorization: Bearer {{AccessToken}}
 
-### Get exchange conversion artifact
-GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}/fe8020e9-b2d3-3bac-b5c5-d0ae1d55a36a.obj
+### Get conversion job artifact
+GET {{DataExchangeViewingService_HostAddress }}/api/jobs/{{jobId}}/artifacts/fe8020e9-b2d3-3bac-b5c5-d0ae1d55a36a.obj
 Authorization: Bearer {{AccessToken}}
 Accept: model/obj
 
-### Get exchange conversion artifact
-GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}/b628c5eb-dfb3-3e8b-8f07-c6b4ffc554c4.glb
+### Get conversion job artifact
+GET {{DataExchangeViewingService_HostAddress }}/api/jobs/{{jobId}}/artifacts/b628c5eb-dfb3-3e8b-8f07-c6b4ffc554c4.glb
 Authorization: Bearer {{AccessToken}}
 
-### Get exchange conversion artifact
-GET {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}/b628c5eb-dfb3-3e8b-8f07-c6b4ffc554c4.usdz
+### Get conversion job artifact
+GET {{DataExchangeViewingService_HostAddress }}/api/jobs/{{jobId}}/artifacts/b628c5eb-dfb3-3e8b-8f07-c6b4ffc554c4.usdz
 Authorization: Bearer {{AccessToken}}
 
-### Delete exchange conversion
-DELETE {{DataExchangeViewingService_HostAddress }}/api/exchanges/{{collectionId}}/{{exchangeUrn}}
+### Delete conversion job
+DELETE {{DataExchangeViewingService_HostAddress }}/api/jobs/{{jobId}}
 Authorization: Bearer {{AccessToken}}
