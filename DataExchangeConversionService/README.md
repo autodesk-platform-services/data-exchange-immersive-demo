@@ -2,6 +2,30 @@
 
 Simple ASP.NET application extracting geometry data from [Data Exchanges](https://aps.autodesk.com/data-exchange-cover-page) using the [Data Exchange .NET SDK v8](https://aps.autodesk.com/en/docs/dx-sdk/v8.0.0/developers_guide/overview/).
 
+## Job IDs
+
+Every endpoint addresses a *conversion job*, identified by a single path segment: the base64url
+encoding (RFC 4648 §5 — `-` and `_` instead of `+` and `/`, no `=` padding) of
+
+```
+{collectionId}|{exchangeUrn}
+```
+
+| Part | Description | Example |
+| --- | --- | --- |
+| `{collectionId}` | Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{exchangeUrn}` | URN of your exchange | `urn:adsk.wipprod:dm.lineage:lbJRla4QRhO-Xnu-1bEg5Q` |
+
+```js
+const jobId = btoa(`${collectionId}|${exchangeUrn}`)
+  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+// Yi4xMjM0NTY3OC1hYmNkLTEyMzQtYWJjZC0xMjM0NTY3ODkwYWJ8dXJuOmFkc2sud2lwcHJvZDpkbS5saW5lYWdlOmxiSlJsYTRRUmhPLVhudS0xYkVnNVE
+```
+
+The job ID is derived from the pair, not handed out by the service, so a client can compute it
+before any job exists. base64url output is already safe inside a path segment, so — unlike the
+exchange URN it encodes — it needs no percent-encoding.
+
 ## Live demo
 
 The application is deployed to an Azure Web App. Here's how you can try it out:
@@ -12,14 +36,13 @@ The application is deployed to an Azure Web App. Here's how you can try it out:
 ### Extracting geometry from an exchange
 
 ```curl
-POST https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{collectionId}}/{{exchangeUrn}}
+POST https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{exchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
-| `{{collectionId}}` | URL-encoded Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
 The endpoint will return `202 Accepted` to indicate that the conversion has started in the background.
@@ -27,14 +50,13 @@ The endpoint will return `202 Accepted` to indicate that the conversion has star
 ### Checking status of an extraction
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{collectionId}}/{{exchangeUrn}}
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{exchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
-| `{{collectionId}}` | URL-encoded Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
 The endpoint will return JSON object with extraction metadata:
@@ -54,19 +76,20 @@ The endpoint will return JSON object with extraction metadata:
 }
 ```
 
+A job ID that is not valid base64url, or that does not decode to a `{collectionId}|{exchangeUrn}` pair, is answered with `400 Bad Request` on every endpoint.
+
 The endpoint returns `404 Not Found` when there is no conversion for the exchange — *including* when the only stored conversion was produced from a version the exchange has since moved past. An exchange's lineage URN doesn't change when a new version is published, but its contents do, so a stale conversion is reported as absent rather than as the current one. Requesting a new conversion (`POST`) discards the superseded artifacts and converts the current version; artifact fetches are gated the same way, so a stale USDZ is never served.
 
 ### Fetching an extraction artifact
 
 ```curl
-GET https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{collectionId}}/{{exchangeUrn}}/{{ArtifactFileName}}
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}/artifacts/{{ArtifactFileName}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{exchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
-| `{{collectionId}}` | URL-encoded Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
 | `{{ArtifactFileName}}` | Name of the artifact file to fetch | `foo.obj` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
@@ -77,14 +100,13 @@ The endpoint will return the raw bytes of the requested artifact file, with the 
 > Note: this will only remove the extracted geometry, not the data exchange itself.
 
 ```curl
-DELETE https://data-exchange-conversion-service.azurewebsites.net/api/exchanges/{{collectionId}}/{{exchangeUrn}}
+DELETE https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}
 Authorization: Bearer {{AccessToken}}
 ```
 
 | Parameter | Description | Example |
 | --- | --- | --- |
-| `{{exchangeUrn}}` | URL-encoded URN of your exchange | `urn%3Aadsk.wipprod%3Adm.lineage%3AlbJRla4QRhO-Xnu-1bEg5Q` |
-| `{{collectionId}}` | URL-encoded Data Exchange collection ID (the ACC project ID) | `b.12345678-abcd-1234-abcd-1234567890ab` |
+| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
 ## Running locally

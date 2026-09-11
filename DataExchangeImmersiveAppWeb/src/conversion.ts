@@ -16,14 +16,28 @@ export interface ConversionStatus {
   error?: string | null;
 }
 
-// The exchange URN contains characters (':', '/', etc.) that must be escaped to fit in a path segment.
-function exchangeEndpoint(urn: string, collectionId: string): string {
-  return `${BASE_URL}/api/exchanges/${encodeURIComponent(collectionId)}/${encodeURIComponent(urn)}`;
+// The service addresses a conversion job by one path segment: the base64url encoding of
+// `"{collectionId}|{exchangeUrn}"`. The job ID is derived from the pair rather than handed out by
+// the service, so it can be computed before any job exists — and because base64url uses only
+// characters that are already legal in a path, nothing here needs percent-encoding.
+export function jobId(collectionId: string, urn: string): string {
+  // `btoa` takes a string of code points below 256, so the text is encoded to UTF-8 bytes first.
+  // Collection IDs and URNs are ASCII in practice, but a stray non-ASCII character should produce
+  // a wrong-looking job ID rather than throw from inside a fetch.
+  const utf8 = new TextEncoder().encode(`${collectionId}|${urn}`);
+  return btoa(String.fromCharCode(...utf8))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function jobEndpoint(urn: string, collectionId: string): string {
+  return `${BASE_URL}/api/jobs/${jobId(collectionId, urn)}`;
 }
 
 // Kicks off a conversion. The service responds 202 Accepted and runs the work in the background.
 export async function startConversion(token: string, urn: string, collectionId: string): Promise<void> {
-  const response = await fetch(exchangeEndpoint(urn, collectionId), {
+  const response = await fetch(jobEndpoint(urn, collectionId), {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -34,7 +48,7 @@ export async function startConversion(token: string, urn: string, collectionId: 
 
 // Deletes the results of a previous conversion so a new one can be started for this exchange.
 export async function deleteConversion(token: string, urn: string, collectionId: string): Promise<void> {
-  const response = await fetch(exchangeEndpoint(urn, collectionId), {
+  const response = await fetch(jobEndpoint(urn, collectionId), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -45,7 +59,7 @@ export async function deleteConversion(token: string, urn: string, collectionId:
 
 // Returns the current conversion status, or null if no conversion has been started for this exchange.
 export async function getStatus(token: string, urn: string, collectionId: string): Promise<ConversionStatus | null> {
-  const response = await fetch(exchangeEndpoint(urn, collectionId), { headers: { Authorization: `Bearer ${token}` } });
+  const response = await fetch(jobEndpoint(urn, collectionId), { headers: { Authorization: `Bearer ${token}` } });
   if (response.status === 404) {
     return null;
   }
@@ -57,9 +71,9 @@ export async function getStatus(token: string, urn: string, collectionId: string
 
 async function fetchArtifact(token: string, urn: string, collectionId: string, fileName: string): Promise<Response> {
   const response = await fetch(
-    `${exchangeEndpoint(urn, collectionId)}/${encodeURIComponent(fileName)}`,
+    `${jobEndpoint(urn, collectionId)}/artifacts/${encodeURIComponent(fileName)}`,
     {
-    headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}` },
     },
   );
   if (!response.ok) {

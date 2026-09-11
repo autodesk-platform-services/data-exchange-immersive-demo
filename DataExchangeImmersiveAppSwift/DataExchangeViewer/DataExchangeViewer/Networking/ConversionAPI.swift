@@ -6,25 +6,20 @@
 import Foundation
 
 struct ConversionAPI {
-    private static let pathSegmentAllowed = CharacterSet(charactersIn:
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
-
-    // Not private: percent-encoding a URN into a path is subtle enough that
-    // `ConversionEndpointTests` checks it directly.
+    // Not private: `ConversionEndpointTests` checks the job ID that goes into the path, because
+    // the service has to read back exactly the collection and URN the app encoded.
     func artifactEndpoint(urn: String, collectionId: String, fileName: String) -> URL {
-        endpoint(urn: urn, collectionId: collectionId).appendingPathComponent(fileName)
+        endpoint(urn: urn, collectionId: collectionId)
+            .appendingPathComponent("artifacts")
+            .appendingPathComponent(fileName)
     }
 
     func endpoint(urn: String, collectionId: String) -> URL {
-        // `appendingPathComponent` would double-encode an already percent-encoded segment
-        // (it treats '%' itself as a character needing escaping), so the URL is built from
-        // a raw string instead of layering `appendingPathComponent` on top of `encoded`.
-        let encoded = urn.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowed) ?? urn
-        let encodedCollectionId = collectionId.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowed) ?? collectionId
-        let urlString = ConversionServiceConstants.baseURL.absoluteString
-            + "/api/exchanges/" + encodedCollectionId
-            + "/" + encoded
-        return URL(string: urlString)!
+        // The job ID is base64url, whose alphabet is entirely safe in a path segment, so there is
+        // no percent-encoding here to get wrong — and `appendingPathComponent` can be used on the
+        // result without the double-encoding it would cause on an already-escaped URN.
+        let jobId = JobID.encode(collectionId: collectionId, exchangeUrn: urn)
+        return URL(string: ConversionServiceConstants.baseURL.absoluteString + "/api/jobs/" + jobId)!
     }
 
     // Maps the error status codes shared by every endpoint (401/403); anything else becomes a

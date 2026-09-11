@@ -24,6 +24,6 @@ public static class ConversionStatus
     public const string Failed = "failed";
 }
 
-// An exchange as the service currently sees it: the lineage URN it is addressed by, plus the
-// version its contents would be converted from right now.
-public sealed record ExchangeIdentity(string ExchangeUrn, string? FileVersionUrn);
+// An exchange as the service currently sees it: the job that addresses it, plus the version its
+// contents would be converted from right now.
+public sealed record ExchangeIdentity(JobId Job, string? FileVersionUrn);
