@@ -14,6 +14,11 @@ struct ConversionAPI {
             .appendingPathComponent(fileName)
     }
 
+    /// The conversion log, which is a sub-resource of the job rather than one of its artifacts.
+    func logEndpoint(urn: String, collectionId: String) -> URL {
+        endpoint(urn: urn, collectionId: collectionId).appendingPathComponent("log")
+    }
+
     func endpoint(urn: String, collectionId: String) -> URL {
         // The job ID is base64url, whose alphabet is entirely safe in a path segment, so there is
         // no percent-encoding here to get wrong — and `appendingPathComponent` can be used on the
@@ -39,20 +44,25 @@ struct ConversionAPI {
         let http = response as? HTTPURLResponse
         switch http?.statusCode {
         case 404: return nil
-        case 200: return try JSONDecoder().decode(ConversionMetadata.self, from: data)
+        case 200: return try JSONDecoder.conversionService.decode(ConversionMetadata.self, from: data)
         default: throw errorForStatus(http, data: data)
         }
     }
 
-    func start(urn: String, collectionId: String, token: String) async throws {
+    /// Starts a conversion, or adopts the one already running or already finished, and returns the
+    /// job's state as the service reports it.
+    ///
+    /// The call is idempotent — it used to answer 409 when a conversion existed, which meant the
+    /// only way to ask again was to DELETE first. Returns nil if the service answers 202 without a
+    /// body, which is what an older build does.
+    func start(urn: String, collectionId: String, token: String) async throws -> ConversionMetadata? {
         var request = URLRequest(url: endpoint(urn: urn, collectionId: collectionId))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
         let http = response as? HTTPURLResponse
         switch http?.statusCode {
-        case 202: return
-        case 409: throw ConversionError.conflict
+        case 202: return try? JSONDecoder.conversionService.decode(ConversionMetadata.self, from: data)
         default: throw errorForStatus(http, data: data)
         }
     }
@@ -87,14 +97,22 @@ struct ConversionAPI {
     /// `onProgress` receives the bytes written so far and the total the service declared, when it
     /// declared one. It is called on `URLSession`'s delegate queue rather than the main actor.
     func downloadArtifact(
+        artifact: ConversionArtifact,
         urn: String,
         collectionId: String,
-        fileName: String,
         token: String,
         onProgress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }
     ) async throws -> URL {
-        var request = URLRequest(url: artifactEndpoint(urn: urn, collectionId: collectionId, fileName: fileName))
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // The presigned URL carries its own authorization, so following it skips the bearer-token
+        // path on the service — and with it the Data Exchange round trip that path performs on
+        // every artifact request just to authorize one.
+        let presigned = artifact.url.flatMap(URL.init(string:))
+        var request = URLRequest(
+            url: presigned ?? artifactEndpoint(urn: urn, collectionId: collectionId, fileName: artifact.name)
+        )
+        if presigned == nil {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         // Held in a local so the delegate outlives the call regardless of how strongly
         // `URLSessionTask` happens to reference it.
         let progress = DownloadProgressDelegate(onProgress: onProgress)
@@ -110,16 +128,21 @@ struct ConversionAPI {
         return fileURL
     }
 
-    /// Reads a text artifact from `offset` onwards, so a growing conversion log is tailed rather
-    /// than refetched in full on every poll. Returns nil when the artifact does not exist.
-    func artifactChunk(
+    /// Reads the conversion log from `offset` onwards, so a growing log is tailed rather than
+    /// refetched in full on every poll. Returns nil when there is no log.
+    ///
+    /// `presignedUrl` is the `logUrl` from the last status, when there was one. The bearer token is
+    /// sent either way: the service takes the presigned path whenever a secret is present and
+    /// ignores the header, so there is one request shape rather than two.
+    func logChunk(
         urn: String,
         collectionId: String,
-        fileName: String,
+        presignedUrl: String?,
         token: String,
         from offset: Int
     ) async throws -> ArtifactChunk? {
-        var request = URLRequest(url: artifactEndpoint(urn: urn, collectionId: collectionId, fileName: fileName))
+        let url = presignedUrl.flatMap(URL.init(string:)) ?? logEndpoint(urn: urn, collectionId: collectionId)
+        var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if offset > 0 {
             request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
@@ -137,8 +160,9 @@ struct ConversionAPI {
         }
     }
 
-    static func findArtifact(_ metadata: ConversionMetadata?, extension ext: String) -> String? {
-        metadata?.artifacts.first { $0.hasSuffix(ext) }
+    /// The first artifact of the given type, or nil when the conversion produced none.
+    static func findArtifact(_ metadata: ConversionMetadata?, type: String) -> ConversionArtifact? {
+        metadata?.artifacts.first { $0.type == type }
     }
 }
 

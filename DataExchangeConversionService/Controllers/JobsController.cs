@@ -20,8 +20,8 @@ public sealed class JobsController : ControllerBase
     }
 
     // Returns the conversion status and the artifacts available for a job. A conversion produced
-    // from a version the exchange has since moved past is reported as 404, the same as no
-    // conversion at all — see ConversionService.GetStatus.
+    // from a version the exchange has since moved past is reported with status "superseded" and
+    // carries no artifact URLs — see ConversionService.GetStatus.
     [HttpGet("{jobId}")]
     public async Task<IActionResult> GetStatus(string jobId)
     {
@@ -29,29 +29,33 @@ public sealed class JobsController : ControllerBase
         if (failure is not null) { return failure; }
 
         var status = _conversionService.GetStatus(exchange);
-        return status is null ? NotFound() : Ok(status);
+        if (status is null) { return NotFound(); }
+
+        AddPresignedUrls(exchange, status);
+        return Ok(status);
     }
 
-    // Starts a new conversion and returns immediately while it runs in the background.
+    // Starts a conversion and returns immediately while it runs in the background.
+    //
+    // Idempotent: asking for a conversion that is already running, or already finished, answers
+    // 202 with that conversion rather than 409. The state the caller wants either is being reached
+    // or has been, and the 409 it used to get only meant "DELETE first, then ask again" — which is
+    // what both clients ended up doing by hand. A failed or superseded conversion is replaced,
+    // since neither is a result worth keeping. `?force=true` replaces whatever is stored.
+    //
+    // The 202 carries the job's current state, so a caller learns whether it is waiting on a fresh
+    // conversion or can go straight to the artifacts without a second request.
     [HttpPost("{jobId}")]
-    public async Task<IActionResult> StartConversion(string jobId)
+    public async Task<IActionResult> StartConversion(string jobId, [FromQuery] bool force = false)
     {
         var (failure, exchange) = await ResolveJobAsync(jobId);
         if (failure is not null) { return failure; }
 
         TryGetBearerToken(out var bearerToken);
-        if (_conversionService.GetStatus(exchange) is not null)
-        {
-            return Conflict(new ProblemDetails
-            {
-                Title = "Conversion already in progress",
-                Detail = "This exchange is already being processed. Delete the current conversion first if you want to start it again.",
-                Status = StatusCodes.Status409Conflict
-            });
-        }
-        _conversionService.StartObjConversion(exchange, bearerToken);
+        var status = _conversionService.StartConversion(exchange, bearerToken, force);
+        AddPresignedUrls(exchange, status);
 
-        return Accepted($"/api/jobs/{exchange.Job.Value}");
+        return Accepted($"/api/jobs/{exchange.Job.Value}", status);
     }
 
     // Deletes the conversion results for a job. This does not affect the exchange itself or its
@@ -67,19 +71,95 @@ public sealed class JobsController : ControllerBase
     }
 
     // Returns a single artifact produced by a conversion (e.g. the generated USDZ package).
+    //
+    // Authorized either by the usual bearer token, or by the `secret` query parameter carried by
+    // the presigned URLs in a status response — which is the only way to hand these bytes to
+    // something that cannot send an Authorization header, such as a <model-viewer> `src`.
     [HttpGet("{jobId}/artifacts/{artifact}")]
-    [Produces("model/obj", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
-    public async Task<IActionResult> GetArtifact(string jobId, string artifact)
+    [Produces("model/obj", "model/mtl", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
+    public async Task<IActionResult> GetArtifact(string jobId, string artifact, [FromQuery] string? secret)
     {
+        if (!string.IsNullOrEmpty(secret))
+        {
+            if (!JobId.TryParse(jobId, out var presignedJob)) { return MalformedJobId(); }
+
+            // A wrong secret is a 404 rather than a 403: a caller holding an unusable URL learns
+            // nothing about whether the job behind it exists.
+            if (!_conversionService.IsJobSecretValid(presignedJob, secret)) { return NotFound(); }
+
+            var presignedFile = _conversionService.GetPresignedArtifact(presignedJob, artifact);
+            return presignedFile is null ? NotFound() : StreamArtifact(presignedFile, asAttachment: false);
+        }
+
         var (failure, exchange) = await ResolveJobAsync(jobId);
         if (failure is not null) { return failure; }
 
         var file = _conversionService.GetArtifact(exchange, artifact);
-        if (file is null) { return NotFound(); }
+        return file is null ? NotFound() : StreamArtifact(file, asAttachment: true);
+    }
 
-        // Streams from disk, and range processing lets a client resume an interrupted USDZ
-        // download or tail the growing conversion log instead of refetching it whole.
-        return PhysicalFile(file.Path, file.ContentType, file.FileName, enableRangeProcessing: true);
+    // Streams from disk, and range processing lets a client resume an interrupted USDZ download or
+    // tail the growing conversion log instead of refetching it whole.
+    //
+    // A presigned URL exists to be embedded in something that renders it, so it is served inline;
+    // passing a file name would set `Content-Disposition: attachment`, which is the right answer
+    // for a deliberate download over the bearer-token path but not for a <model> `src`.
+    private IActionResult StreamArtifact(Artifact file, bool asAttachment)
+    {
+        return asAttachment
+            ? PhysicalFile(file.Path, file.ContentType, file.FileName, enableRangeProcessing: true)
+            : PhysicalFile(file.Path, file.ContentType, enableRangeProcessing: true);
+    }
+
+    // Gives the log — and every artifact — an absolute URL carrying the job's secret, so a client
+    // never has to build one, and the only place the secret appears is a response the caller had to
+    // be authorized to read.
+    private void AddPresignedUrls(ExchangeIdentity exchange, ConversionMetadata status)
+    {
+        var secret = _conversionService.GetJobSecret(exchange.Job);
+        if (secret is null) { return; }
+
+        var jobUrl = $"{Request.Scheme}://{Request.Host}/api/jobs/{exchange.Job.Value}";
+        var query = $"?secret={Uri.EscapeDataString(secret)}";
+
+        // Offered whatever state the job is in: the log is most worth reading when the conversion
+        // failed or has been superseded.
+        status.LogUrl = $"{jobUrl}/log{query}";
+
+        // A superseded conversion's artifacts are not served, so URLs for them would only 404.
+        if (!ConversionService.IsUsable(status)) { return; }
+
+        foreach (var artifact in status.Artifacts)
+        {
+            artifact.Url = $"{jobUrl}/artifacts/{Uri.EscapeDataString(artifact.Name)}{query}";
+        }
+    }
+
+    // Returns the conversion log, which is readable whatever state the job is in — including
+    // failed and superseded, where it is the only thing that explains what happened.
+    //
+    // Authorized the same two ways as an artifact: the usual bearer token, or the `secret` carried
+    // by the presigned `logUrl` in a status response.
+    [HttpGet("{jobId}/log")]
+    [Produces("text/plain")]
+    public async Task<IActionResult> GetLog(string jobId, [FromQuery] string? secret)
+    {
+        if (!JobId.TryParse(jobId, out var job)) { return MalformedJobId(); }
+
+        if (!string.IsNullOrEmpty(secret))
+        {
+            if (!_conversionService.IsJobSecretValid(job, secret)) { return NotFound(); }
+        }
+        else
+        {
+            var (failure, _) = await ResolveJobAsync(jobId);
+            if (failure is not null) { return failure; }
+        }
+
+        var log = _conversionService.GetLog(job);
+        // Served inline, and with range processing, so a client can tail the growing log instead of
+        // refetching it whole on every poll.
+        return log is null ? NotFound() : StreamArtifact(log, asAttachment: false);
     }
 
     // Decodes the job ID, checks that the request carries a bearer token with access to the
@@ -91,12 +171,7 @@ public sealed class JobsController : ControllerBase
     {
         if (!JobId.TryParse(jobId, out var job))
         {
-            return (BadRequest(new ProblemDetails
-            {
-                Title = "Malformed job ID",
-                Detail = "A job ID is the base64url encoding of '{collectionId}|{exchangeUrn}'.",
-                Status = StatusCodes.Status400BadRequest
-            }), new ExchangeIdentity(new JobId(string.Empty, string.Empty), null));
+            return (MalformedJobId(), new ExchangeIdentity(new JobId(string.Empty, string.Empty), null));
         }
 
         var unresolved = new ExchangeIdentity(job, null);
@@ -122,6 +197,16 @@ public sealed class JobsController : ControllerBase
         }
 
         return (null, exchange);
+    }
+
+    private IActionResult MalformedJobId()
+    {
+        return BadRequest(new ProblemDetails
+        {
+            Title = "Malformed job ID",
+            Detail = "A job ID is the base64url encoding of '{collectionId}|{exchangeUrn}'.",
+            Status = StatusCodes.Status400BadRequest
+        });
     }
 
     private bool TryGetBearerToken(out string bearerToken)

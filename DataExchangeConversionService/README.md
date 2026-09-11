@@ -44,8 +44,17 @@ Authorization: Bearer {{AccessToken}}
 | --- | --- | --- |
 | `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
+| `force` | Optional query parameter. `true` discards whatever is stored and converts again | `?force=true` |
 
-The endpoint will return `202 Accepted` to indicate that the conversion has started in the background.
+The endpoint returns `202 Accepted` with the job's current state — the same document the status
+endpoint returns — so a caller learns whether it is waiting on a fresh conversion or can go
+straight to the artifacts without a second request.
+
+The call is idempotent. Asking for a conversion that is already `running`, or already `completed`,
+returns that conversion and starts nothing: the state you asked for either is being reached or has
+been. A `failed` or `superseded` conversion is replaced, since neither is a result worth keeping —
+so retrying a failure is just another `POST`, with no `DELETE` first. Pass `?force=true` to convert
+again over a `completed` conversion.
 
 ### Checking status of an extraction
 
@@ -63,22 +72,102 @@ The endpoint will return JSON object with extraction metadata:
 
 ```jsonc
 {
-  "status": "completed",  // "running" | "completed" | "failed"
-  "error": null,          // Error message in case "status" is "failed"
+  "status": "completed",  // "running" | "completed" | "failed" | "superseded"
+  "error": null,          // Only when "status" is "failed":
+                          // {
+                          //   "message": "The conversion failed while downloading exchange as OBJ.",
+                          //   "step": "downloadingObj",
+                          //   "detail": "InvalidOperationException: ..."
+                          // }
   "fileVersionUrn": "urn:adsk.wipprod:fs.file:vf.lbJRla4QRhO-Xnu-1bEg5Q?version=3",
                           // The exchange version these artifacts were produced from
-  "artifacts": [          // List of filenames of generated artifacts in case "status" is "completed"
-    "foo.obj",
-    "foo.mtl",
-    "foo.glb",            // glTF binary post-processed from the OBJ/MTL via SharpGLTF
-    "foo.usdz"            // USDZ package bundled from the SDK's native USD folder
+  "currentFileVersionUrn": null,
+                          // Only when "status" is "superseded": the version the exchange is at now
+  "createdAt": "2026-09-10T12:00:00Z",   // When the job was accepted
+  "startedAt": "2026-09-10T12:00:01Z",   // When conversion work began; null until it does
+  "updatedAt": "2026-09-10T12:04:12Z",   // Bumped at every step of the pipeline
+  "completedAt": "2026-09-10T12:04:12Z", // When it finished or failed; null while running
+  "logUrl": "https://.../api/jobs/{jobId}/log?secret=...",
+                          // The conversion log, readable in any state — including failed
+  "artifacts": [          // Generated artifacts, described rather than just named
+    {
+      "name": "foo.usdz",
+      "type": "usdz",     // "obj" | "mtl" | "glb" | "usdz" | "unknown"
+      "contentType": "model/vnd.usdz+zip",
+      "size": 184320000,  // bytes, so a client can show real download progress
+      "checksum": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "url": "https://.../api/jobs/{jobId}/artifacts/foo.usdz?secret=..."
+                          // Presigned — needs no Authorization header
+    }
   ]
 }
 ```
 
 A job ID that is not valid base64url, or that does not decode to a `{collectionId}|{exchangeUrn}` pair, is answered with `400 Bad Request` on every endpoint.
 
-The endpoint returns `404 Not Found` when there is no conversion for the exchange — *including* when the only stored conversion was produced from a version the exchange has since moved past. An exchange's lineage URN doesn't change when a new version is published, but its contents do, so a stale conversion is reported as absent rather than as the current one. Requesting a new conversion (`POST`) discards the superseded artifacts and converts the current version; artifact fetches are gated the same way, so a stale USDZ is never served.
+Select an artifact by its `type` rather than by parsing `name` — the file names are derived from
+the exchange's contents and are not predictable.
+
+Timestamps are ISO 8601, UTC, second resolution (`2026-09-10T12:04:12Z`). `updatedAt` moves at
+every step of the pipeline, so it doubles as a liveness heartbeat: a job still reporting `running`
+whose `updatedAt` has stopped advancing is one whose conversion process is gone — the background
+task does not survive a restart of the service, but the metadata it left behind does.
+
+The endpoint returns `404 Not Found` when there is no conversion for the exchange.
+
+A conversion produced from a version the exchange has since moved past is reported with
+`"status": "superseded"` rather than as absent. An exchange's lineage URN doesn't change when a new
+version is published, but its contents do, so the stored artifacts no longer describe the exchange:
+
+- `fileVersionUrn` is the version they *were* produced from, `currentFileVersionUrn` the version the
+  exchange is at now.
+- The artifacts are not served — artifact fetches over the bearer route are gated the same way, so a
+  stale USDZ is never handed out — and they carry no `url`.
+- Requesting a new conversion (`POST`) is not a conflict in this state: it discards the superseded
+  artifacts and converts the current version.
+
+Reporting this as a 404 previously left a client unable to say why artifacts it had a moment ago
+were gone: an exchange nobody had ever converted and one whose conversion had just been invalidated
+looked identical.
+
+> A presigned artifact URL handed out before the conversion was superseded keeps working until the
+> conversion is replaced — see [Presigned artifact URLs](#presigned-artifact-urls).
+
+### Conversion failures
+
+When `status` is `failed`, `error` carries:
+
+| Field | Description |
+| --- | --- |
+| `message` | One sentence, written to be shown to whoever is looking at the screen |
+| `step` | Which step failed, as a stable identifier: `initializing`, `creatingClient`, `fetchingDetails`, `downloadingObj`, `movingArtifacts`, `deletingTempFolder`, `convertingGlb`, `downloadingUsd`, `bundlingUsdz` |
+| `detail` | The exception's type and message — **not** its stack trace |
+
+The full exception, with its stack trace and inner exceptions, goes to the
+[conversion log](#fetching-the-conversion-log), which is readable in this state. `error` used to be
+a single string built from `exception.ToString()`, which meant a server stack trace was handed to
+clients and rendered verbatim — the visionOS detail view put it straight on screen.
+
+### Presigned artifact URLs
+
+Every artifact in a status response carries a `url` with a `secret` query parameter. Requests to it
+need no `Authorization` header, which is the only way to hand these bytes to something that cannot
+send one — a `<model-viewer>` or `<model>` `src`, or a `QLPreviewController`. Without it a client
+has to fetch the whole artifact itself and pass along an object URL, which for a several-hundred-
+megabyte USDZ means materialising the entire package in memory first.
+
+- The secret is 256 bits from a cryptographic RNG, minted per conversion, and appears only in a
+  status response — which the caller had to present a valid bearer token to read.
+- It is revoked when the conversion is deleted or replaced, since it lives in the job's folder.
+- It does **not** expire on its own, and query strings are commonly recorded in server and proxy
+  access logs. Treat a presigned URL as a bearer credential for that one conversion's artifacts.
+- Presigned responses are served inline; the bearer-token route still sets
+  `Content-Disposition: attachment`.
+- Unlike the bearer-token route, the presigned route does not check that the conversion is still of
+  the exchange's current version — with no token there is no way to ask the Data Exchange service
+  what that version is. A presigned URL points at the artifacts of one specific conversion. The
+  status endpoint that hands it out is still version-gated, so a client following a fresh URL never
+  receives stale bytes; only a client holding on to an old one does.
 
 ### Fetching an extraction artifact
 
@@ -93,7 +182,32 @@ Authorization: Bearer {{AccessToken}}
 | `{{ArtifactFileName}}` | Name of the artifact file to fetch | `foo.obj` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
 
-The endpoint will return the raw bytes of the requested artifact file, with the appropriate `Content-Type` header set.
+The endpoint will return the raw bytes of the requested artifact file, with the appropriate `Content-Type` header set. Pass `?secret=...` instead of the `Authorization` header to use a [presigned URL](#presigned-artifact-urls).
+
+This endpoint answers only for artifacts the conversion declared in `artifacts`. The job's own
+bookkeeping — `metadata.json`, including the exception text a failed conversion records in it, and
+the presigning `secret` next to it — lives in the same folder but is not reachable through it.
+
+### Fetching the conversion log
+
+```curl
+GET https://data-exchange-conversion-service.azurewebsites.net/api/jobs/{{jobId}}/log
+Authorization: Bearer {{AccessToken}}
+```
+
+| Parameter | Description | Example |
+| --- | --- | --- |
+| `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
+| `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
+
+Returns `text/plain`, inline, with range requests supported so a client can tail a growing log
+rather than refetch it whole on every poll. The status response's `logUrl` is a presigned
+equivalent that needs no `Authorization` header.
+
+The log is **not** an artifact and no longer appears in `artifacts`: it exists from the moment the
+job starts rather than when it finishes, it grows while the conversion runs, and its size and digest
+are meaningless until it stops. It is readable whatever state the job is in — including `failed` and
+`superseded`, where it is the only thing that explains what happened.
 
 ### Deleting extracted geometry
 

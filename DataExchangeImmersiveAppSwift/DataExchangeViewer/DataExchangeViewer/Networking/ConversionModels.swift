@@ -9,18 +9,101 @@ enum ConversionStatusValue: String, Codable {
     case running
     case completed
     case failed
+    /// Converted, but from a version the exchange has since moved past. The artifacts still exist
+    /// on the service and are not served; a new conversion is what resolves it.
+    case superseded
+}
+
+/// One file produced by a conversion.
+///
+/// The service describes each artifact rather than just naming it, so the app selects the model it
+/// wants by `type` instead of matching a file-name suffix, and knows the download size before the
+/// first byte arrives.
+struct ConversionArtifact: Decodable, Equatable {
+    let name: String
+    let type: String
+    let contentType: String
+    let size: Int64
+    let checksum: String?
+    /// Absolute URL carrying the job's secret, so it needs no `Authorization` header. Absent for a
+    /// conversion produced by an older build of the service, which is why callers fall back to the
+    /// authenticated artifact endpoint.
+    let url: String?
+}
+
+/// Why a conversion failed. Named to avoid colliding with `ConversionError`, which is this
+/// client's transport failures rather than the service's.
+///
+/// `error` used to be a single string built from the server's `exception.ToString()` — type,
+/// message, stack trace and inner exceptions — which the detail view rendered verbatim. The stack
+/// trace now stays in the conversion log.
+struct ConversionFailure: Decodable, Equatable {
+    /// One sentence, written to be shown to whoever is looking at the screen.
+    let message: String
+    /// Which step failed, as a stable identifier rather than prose.
+    let step: String?
+    /// The exception's type and message. Not its stack trace.
+    let detail: String?
+
+    /// What the app puts on screen: the sentence, plus the exception summary when there is one.
+    /// This is a developer-facing demo and "which exception" is usually the next question — but
+    /// the stack trace stays in the log, which is where it belongs.
+    var userFacingText: String {
+        guard let detail, !detail.isEmpty else { return message }
+        return "\(message)\n\n\(detail)"
+    }
 }
 
 struct ConversionMetadata: Decodable {
     let status: ConversionStatusValue
-    let artifacts: [String]
-    let error: String?
+    let artifacts: [ConversionArtifact]
+    let error: ConversionFailure?
+
+    /// The exchange version these artifacts were produced from.
+    let fileVersionUrn: String?
+    /// The version the exchange is at now. Present only when `status` is `.superseded`.
+    let currentFileVersionUrn: String?
+
+    /// Presigned URL for the conversion log. The log is not an artifact, so it is named here
+    /// rather than found in `artifacts` — which is what the app used to do, by the hardcoded
+    /// name "log.txt".
+    let logUrl: String?
+
+    /// When the service accepted the job.
+    let createdAt: Date?
+    /// When the service began converting. Null until it does.
+    let startedAt: Date?
+    /// Last time the service moved the job along. Advances at every step of the pipeline.
+    let updatedAt: Date?
+    /// When the job finished or failed. Null while it is still running.
+    let completedAt: Date?
+
+    /// How long the conversion has been running, measured against the service's clock rather than
+    /// this app's — the elapsed-time readout used to start when the *screen* opened, which for an
+    /// exchange someone else was already converting was arbitrarily short.
+    var startedOrCreatedAt: Date? { startedAt ?? createdAt }
+}
+
+extension JSONDecoder {
+    /// Decodes the conversion service's documents. The service writes timestamps as
+    /// `2026-09-10T12:04:12Z`, which is what `.iso8601` expects — second resolution, no fractional
+    /// part, so neither side has to agree on a format beyond the standard one.
+    static let conversionService: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+}
+
+/// The artifact types the app looks for. The service can produce others (`obj`, `mtl`, `log`);
+/// these are the ones the app has a use for.
+enum ArtifactType {
+    static let usdz = "usdz"
 }
 
 enum ConversionError: Error {
     case unauthorized
     case forbidden
-    case conflict
     case http(Int, String)
 }
 
@@ -35,8 +118,6 @@ extension ConversionError: LocalizedError {
             return "Your session expired."
         case .forbidden:
             return "You don't have access to this exchange."
-        case .conflict:
-            return "This exchange is already being converted."
         case .http(let status, let body):
             let detail = Self.detail(fromResponseBody: body)
             return detail.map { "The conversion service returned an error: \($0)" }
@@ -50,8 +131,6 @@ extension ConversionError: LocalizedError {
             return "Sign in again to continue."
         case .forbidden:
             return "Ask the project administrator to grant you access, then try again."
-        case .conflict:
-            return "Wait for the conversion in progress to finish."
         case .http:
             return "Check that the conversion service is running, then try again."
         }

@@ -3,12 +3,13 @@ import { createRoot } from "react-dom/client";
 import { getStoredToken, handleCallback, login, logout } from "./auth.ts";
 import { getExchanges, getHubs, getProjects, type Exchange, type Hub, type Project } from "./aps.ts";
 import {
+  conversionDuration,
   deleteConversion,
-  fetchArtifactBlob,
-  fetchArtifactText,
+  fetchLogText,
   findArtifact,
   getStatus,
   startConversion,
+  type ConversionArtifact,
   type ConversionStatus,
 } from "./conversion.ts";
 import { initViewer, loadExchange } from "./viewer.ts";
@@ -296,61 +297,76 @@ function ViewerTab({ token, exchange }: { token: string; exchange: Exchange }) {
 // GLB / USDZ tabs: rendered from converted artifacts
 // ---------------------------------------------------------------------------
 
+// The artifact is rendered from its presigned URL rather than from a blob.
+//
+// The `src` attributes of <model-viewer> and <model> cannot send an Authorization header, so this
+// used to fetch the whole artifact with the bearer token and hand over an object URL — which meant
+// a several-hundred-megabyte USDZ was materialised in the tab's memory before anything was drawn.
+// The presigned URL carries its own authorization, so the element streams the bytes itself.
 function ArtifactTab({
-  token,
-  urn,
-  collectionId,
   status,
-  extension,
+  type,
   render,
 }: {
-  token: string;
-  urn: string;
-  collectionId: string;
   status: ConversionStatus | null | undefined;
-  extension: string;
-  render: (blobUrl: string) => React.ReactNode;
+  type: ConversionArtifact["type"];
+  render: (url: string) => React.ReactNode;
 }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const fileName = findArtifact(status, extension);
+  const artifact = findArtifact(status, type);
 
-  useEffect(() => {
-    if (!fileName) {
-      setBlobUrl(null);
-      return;
-    }
-    let revoked: string | null = null;
-    fetchArtifactBlob(token, urn, collectionId, fileName).then((url) => {
-      revoked = url;
-      setBlobUrl(url);
-    });
-    // Revoke the previous object URL when the artifact or exchange changes, to avoid leaks.
-    return () => {
-      if (revoked) URL.revokeObjectURL(revoked);
-    };
-  }, [token, urn, collectionId, fileName]);
-
+  if (status?.status === "superseded") {
+    return (
+      <div className="tab-body placeholder">
+        A newer version of this exchange was published. Convert again to view the {type} artifact.
+      </div>
+    );
+  }
   if (status?.status !== "completed") {
-    return <div className="tab-body placeholder">Run a conversion to view the {extension} artifact.</div>;
+    return <div className="tab-body placeholder">Run a conversion to view the {type} artifact.</div>;
   }
-  if (!fileName) {
-    return <div className="tab-body placeholder">No {extension} artifact was produced.</div>;
+  if (!artifact) {
+    return <div className="tab-body placeholder">No {type} artifact was produced.</div>;
   }
-  if (!blobUrl) {
-    return <div className="tab-body placeholder">Loading {extension}…</div>;
+  if (!artifact.url) {
+    return (
+      <div className="tab-body placeholder">
+        This conversion predates presigned artifact URLs. Re-run it to view the {type} artifact.
+      </div>
+    );
   }
   return (
     <div className="tab-body">
-      <a className="download-button" href={blobUrl} download={fileName} aria-label={`Download ${fileName}`}>
+      {/* Cross-origin, so the `download` attribute is advisory — the service serves presigned
+          artifacts inline and the browser saves what it cannot render. */}
+      <a
+        className="download-button"
+        href={artifact.url}
+        download={artifact.name}
+        aria-label={`Download ${artifact.name} (${formatBytes(artifact.size)})`}
+      >
         <DownloadIcon />
       </a>
-      {render(blobUrl)}
+      {render(artifact.url)}
     </div>
   );
 }
 
+// The artifact size now arrives with the status, so the loading placeholder can say how much is
+// being fetched rather than leaving a multi-hundred-megabyte download unexplained.
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
 // ---------------------------------------------------------------------------
-// Logs tab: streams log.txt, which is readable even while a conversion runs
+// Logs tab: streams the job's log, which is readable even while a conversion runs
 // ---------------------------------------------------------------------------
 
 function LogsTab({
@@ -370,9 +386,11 @@ function LogsTab({
   // `status` is a fresh object on every poll (see MainPane), so this effect re-fetches the log
   // on the same 3s cadence as the status poll while running, and once more when it settles.
   useEffect(() => {
+    // Readable in any state, including superseded and failed — where it is the only thing that
+    // explains what happened.
     if (!status) return;
     let cancelled = false;
-    fetchArtifactText(token, urn, collectionId, "log.txt").then(
+    fetchLogText(token, urn, collectionId, status).then(
       (contents) => {
         if (!cancelled) {
           setText(contents);
@@ -406,6 +424,35 @@ function LogsTab({
       <pre className="log-view">{text}</pre>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Conversion duration: how long it has been running, or how long it took
+// ---------------------------------------------------------------------------
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+// The service reports when it started, so the readout is the conversion's real age rather than
+// how long this tab has been open. Its own component, and its own 1s tick, so the surrounding
+// pane isn't re-rendered once a second while a conversion runs.
+function ConversionDuration({ status }: { status: ConversionStatus }) {
+  const isRunning = status.status === "running";
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [isRunning]);
+
+  const duration = conversionDuration(status, now);
+  if (duration === null) return null;
+  return <span className="duration">{formatDuration(duration)}</span>;
 }
 
 // ---------------------------------------------------------------------------
@@ -448,8 +495,9 @@ function MainPane({
   }, [token, urn, collectionId, status?.status]);
 
   async function convert() {
-    await startConversion(token, urn, collectionId);
-    setStatus({ status: "running", artifacts: [] });
+    // The service answers with the job's real state rather than just "accepted", so there is no
+    // need to fabricate a running status and wait for the first poll to correct it.
+    setStatus(await startConversion(token, urn, collectionId));
   }
 
   async function remove() {
@@ -466,12 +514,21 @@ function MainPane({
         <span className="pane-title pane-title-centered">{exchange.name}</span>
         <div className="conversion">
           {status && <span className={`status ${status.status}`}>{status.status}</span>}
-          {status?.error && <span className="error">{status.error}</span>}
-          {status ? (
+          {status && <ConversionDuration status={status} />}
+          {/* The sentence is shown; the exception summary is a tooltip, and the stack trace is in
+              the Logs tab rather than in this header. */}
+          {status?.error && (
+            <span className="error" title={status.error.detail ?? undefined}>
+              {status.error.message}
+            </span>
+          )}
+          {status && status.status !== "superseded" ? (
             <button className="secondary" onClick={() => void remove()} disabled={status.status === "running"}>
               {status.status === "running" ? "Converting…" : "Clear"}
             </button>
           ) : (
+            // A superseded conversion needs the same action as a missing one: convert again.
+            // Starting one is not a conflict in that state, so no Clear is needed first.
             <button onClick={() => void convert()} disabled={status === undefined}>
               Convert
             </button>
@@ -496,11 +553,8 @@ function MainPane({
       {tab === "viewer" && <ViewerTab token={token} exchange={exchange} />}
       {tab === "glb" && (
         <ArtifactTab
-          token={token}
-          urn={urn}
-          collectionId={collectionId}
           status={status}
-          extension=".glb"
+          type="glb"
           render={(url) => (
             <model-viewer src={url} auto-rotate camera-controls style={{ width: "100%", height: "100%" }} />
           )}
@@ -508,11 +562,8 @@ function MainPane({
       )}
       {tab === "usdz" && (
         <ArtifactTab
-          token={token}
-          urn={urn}
-          collectionId={collectionId}
           status={status}
-          extension=".usdz"
+          type="usdz"
           render={(url) => (
             <>
               <p className="note">

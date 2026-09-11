@@ -11,25 +11,125 @@ import Foundation
 /// to download, and what to show while waiting.
 @Suite("Conversion state")
 struct ConversionStateTests {
+    private func artifact(name: String, type: String, size: Int64 = 0) -> ConversionArtifact {
+        ConversionArtifact(
+            name: name,
+            type: type,
+            contentType: "application/octet-stream",
+            size: size,
+            checksum: nil,
+            url: nil
+        )
+    }
+
+    private func metadata(
+        status: ConversionStatusValue,
+        artifacts: [ConversionArtifact] = [],
+        error: ConversionFailure? = nil,
+        createdAt: Date? = nil,
+        startedAt: Date? = nil
+    ) -> ConversionMetadata {
+        ConversionMetadata(
+            status: status,
+            artifacts: artifacts,
+            error: error,
+            fileVersionUrn: nil,
+            currentFileVersionUrn: nil,
+            logUrl: nil,
+            createdAt: createdAt,
+            startedAt: startedAt,
+            updatedAt: nil,
+            completedAt: nil
+        )
+    }
+
     // MARK: - Metadata
 
     @Test func decodesACompletedConversion() throws {
         let json = """
-        { "status": "completed", "artifacts": ["model.usdz", "log.txt"], "error": null }
+        {
+          "status": "completed",
+          "artifacts": [
+            {
+              "name": "model.usdz",
+              "type": "usdz",
+              "contentType": "model/vnd.usdz+zip",
+              "size": 184320000,
+              "checksum": "sha256:abc",
+              "url": "https://example.test/api/jobs/abc/artifacts/model.usdz?secret=s3cr3t"
+            },
+            { "name": "model.glb", "type": "glb", "contentType": "model/gltf-binary", "size": 512, "checksum": null }
+          ],
+          "error": null,
+          "logUrl": "https://example.test/api/jobs/abc/log?secret=s3cr3t"
+        }
         """
         let metadata = try JSONDecoder().decode(ConversionMetadata.self, from: Data(json.utf8))
         #expect(metadata.status == .completed)
-        #expect(metadata.artifacts == ["model.usdz", "log.txt"])
+        #expect(metadata.artifacts.map(\.name) == ["model.usdz", "model.glb"])
+        #expect(metadata.logUrl == "https://example.test/api/jobs/abc/log?secret=s3cr3t")
+        #expect(metadata.artifacts.first?.size == 184_320_000)
+        #expect(metadata.artifacts.first?.contentType == "model/vnd.usdz+zip")
+        #expect(metadata.artifacts.first?.checksum == "sha256:abc")
+        #expect(metadata.artifacts.first?.url == "https://example.test/api/jobs/abc/artifacts/model.usdz?secret=s3cr3t")
+        // Absent for a conversion made before the service issued presigned URLs.
+        #expect(metadata.artifacts.last?.url == nil)
+        #expect(metadata.artifacts.last?.checksum == nil)
         #expect(metadata.error == nil)
     }
 
     @Test func decodesAFailedConversionWithItsMessage() throws {
         let json = """
-        { "status": "failed", "artifacts": [], "error": "Unsupported geometry" }
+        {
+          "status": "failed",
+          "artifacts": [],
+          "error": {
+            "message": "The conversion failed while downloading exchange as OBJ.",
+            "step": "downloadingObj",
+            "detail": "InvalidOperationException: the SDK could not download the exchange"
+          }
+        }
         """
-        let metadata = try JSONDecoder().decode(ConversionMetadata.self, from: Data(json.utf8))
+        let metadata = try JSONDecoder.conversionService.decode(ConversionMetadata.self, from: Data(json.utf8))
         #expect(metadata.status == .failed)
-        #expect(metadata.error == "Unsupported geometry")
+        #expect(metadata.error?.message == "The conversion failed while downloading exchange as OBJ.")
+        #expect(metadata.error?.step == "downloadingObj")
+    }
+
+    /// The sentence is what a person reads; the exception summary follows it because this is a
+    /// developer-facing demo. Neither is a stack trace, which is what used to arrive here.
+    @Test func composesTheFailureTextFromTheMessageAndDetail() {
+        let withDetail = ConversionFailure(
+            message: "The conversion failed while bundling the USD files.",
+            step: "bundlingUsdz",
+            detail: "IOException: disk full"
+        )
+        #expect(withDetail.userFacingText.contains("The conversion failed while bundling the USD files."))
+        #expect(withDetail.userFacingText.contains("IOException: disk full"))
+
+        let bare = ConversionFailure(message: "It failed.", step: nil, detail: nil)
+        #expect(bare.userFacingText == "It failed.")
+
+        let empty = ConversionFailure(message: "It failed.", step: nil, detail: "")
+        #expect(empty.userFacingText == "It failed.")
+    }
+
+    /// A conversion of a version the exchange has moved past. Previously a 404, indistinguishable
+    /// from an exchange nobody had ever converted.
+    @Test func decodesASupersededConversion() throws {
+        let json = """
+        {
+          "status": "superseded",
+          "artifacts": [],
+          "error": null,
+          "fileVersionUrn": "urn:adsk.wipprod:fs.file:vf.abc?version=2",
+          "currentFileVersionUrn": "urn:adsk.wipprod:fs.file:vf.abc?version=3"
+        }
+        """
+        let metadata = try JSONDecoder.conversionService.decode(ConversionMetadata.self, from: Data(json.utf8))
+        #expect(metadata.status == .superseded)
+        #expect(metadata.fileVersionUrn == "urn:adsk.wipprod:fs.file:vf.abc?version=2")
+        #expect(metadata.currentFileVersionUrn == "urn:adsk.wipprod:fs.file:vf.abc?version=3")
     }
 
     /// A status the app doesn't know is a decoding failure rather than a silently mis-mapped
@@ -43,24 +143,60 @@ struct ConversionStateTests {
         }
     }
 
+    @Test func decodesTheServiceTimestamps() throws {
+        let json = """
+        {
+          "status": "running",
+          "artifacts": [],
+          "error": null,
+          "createdAt": "2026-09-10T12:00:00Z",
+          "startedAt": "2026-09-10T12:00:01Z",
+          "updatedAt": "2026-09-10T12:04:12Z",
+          "completedAt": null
+        }
+        """
+        let metadata = try JSONDecoder.conversionService.decode(ConversionMetadata.self, from: Data(json.utf8))
+        #expect(metadata.createdAt == Date(timeIntervalSince1970: 1_789_041_600))
+        #expect(metadata.startedAt == Date(timeIntervalSince1970: 1_789_041_601))
+        #expect(metadata.updatedAt == Date(timeIntervalSince1970: 1_789_041_852))
+        #expect(metadata.completedAt == nil)
+    }
+
+    /// A conversion that has not begun yet still has a creation time to measure the wait from.
+    @Test func fallsBackToTheCreationTimeBeforeTheConversionStarts() {
+        let created = Date(timeIntervalSince1970: 1_789_041_600)
+        #expect(metadata(status: .running, createdAt: created).startedOrCreatedAt == created)
+
+        let started = created.addingTimeInterval(1)
+        #expect(metadata(status: .running, createdAt: created, startedAt: started).startedOrCreatedAt == started)
+        #expect(metadata(status: .running).startedOrCreatedAt == nil)
+    }
+
     // MARK: - Artifact selection
 
+    /// Selection is by `type`, not by file-name suffix: the names come from the exchange's
+    /// contents and are not predictable, and an exchange called `Plans.usdz.rvt` should not be
+    /// mistaken for a model.
     @Test func findsTheUSDZAmongTheArtifacts() {
-        let metadata = ConversionMetadata(
+        let metadata = metadata(
             status: .completed,
-            artifacts: ["log.txt", "metadata.json", "Basement.usdz"],
-            error: nil
+            artifacts: [
+                artifact(name: "Basement.mtl", type: "mtl"),
+                artifact(name: "Basement.obj", type: "obj"),
+                artifact(name: "Basement.usdz", type: "usdz", size: 1_024),
+            ]
         )
-        #expect(ConversionAPI.findArtifact(metadata, extension: ".usdz") == "Basement.usdz")
-        #expect(ConversionAPI.findArtifact(metadata, extension: ".txt") == "log.txt")
+        #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz)?.name == "Basement.usdz")
+        #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz)?.size == 1_024)
+        #expect(ConversionAPI.findArtifact(metadata, type: "obj")?.name == "Basement.obj")
     }
 
     /// A conversion that reports success without producing a model is a failure the detail view
     /// has to explain, so this must not return something unusable.
     @Test func reportsNoUSDZWhenTheConversionProducedNone() {
-        let metadata = ConversionMetadata(status: .completed, artifacts: ["log.txt"], error: nil)
-        #expect(ConversionAPI.findArtifact(metadata, extension: ".usdz") == nil)
-        #expect(ConversionAPI.findArtifact(nil, extension: ".usdz") == nil)
+        let metadata = metadata(status: .completed, artifacts: [artifact(name: "Basement.obj", type: "obj")])
+        #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz) == nil)
+        #expect(ConversionAPI.findArtifact(nil, type: ArtifactType.usdz) == nil)
     }
 
     // MARK: - Progress
@@ -70,6 +206,14 @@ struct ConversionStateTests {
     @Test func reportsNoFractionWhileConverting() {
         let activity = ConversionActivity(since: Date())
         #expect(activity.fractionCompleted == nil)
+    }
+
+    /// The service declares the artifact size in the status, so the bar is determinate before any
+    /// bytes arrive — it used to sit at "unknown" until the response headers landed.
+    @Test func reportsProgressFromTheDeclaredSizeBeforeAnyBytesArrive() {
+        var activity = ConversionActivity(since: Date())
+        activity.phase = .downloading(receivedBytes: 0, totalBytes: 184_320_000)
+        #expect(activity.fractionCompleted == 0)
     }
 
     @Test func reportsNoFractionForADownloadOfUnknownLength() {

@@ -11,6 +11,10 @@ enum ConversionState {
     case running(ConversionActivity)
     case completed
     case failed(String)
+    /// A conversion exists, but of a version the exchange has since moved past. Distinct from
+    /// `notConverted` because the person is told a *newer version was published* rather than that
+    /// nothing was ever converted — the service used to report both as a 404.
+    case superseded
 }
 
 /// What the app is waiting on while a conversion is in flight, so the UI can show something
@@ -23,9 +27,10 @@ struct ConversionActivity {
         case downloading(receivedBytes: Int64, totalBytes: Int64?)
     }
 
-    /// When the app started waiting — not when the service started converting, which it doesn't
-    /// report. Enough for an elapsed-time readout that shows the wait is still moving.
-    let since: Date
+    /// When the service started converting, as the service reports it. Falls back to the moment
+    /// the app started waiting for a job it has not yet had a status for — the first `POST`
+    /// answers 202 with no body, so the real time arrives with the first poll and replaces this.
+    var since: Date
     var phase: Phase = .converting
 
     /// Progress in 0...1, or nil when it can't be known: throughout the conversion phase, and
@@ -58,6 +63,11 @@ final class ConversionStore {
     /// polling started unconditionally from `start`, which meant a guaranteed 404 on every
     /// detail-view open for an exchange that had never been converted.
     private var isLogVisible = false
+
+    /// The presigned log URL from the most recent status, when the service supplied one. The log
+    /// used to be fetched as an artifact called "log.txt" — a name the app had no business
+    /// knowing, and which stopped being in `artifacts` once the log became its own sub-resource.
+    private var logURL: String?
 
     /// Status polling starts fast, because a small conversion can finish in a few seconds, then
     /// backs off so a long BIM conversion isn't polled 100 times.
@@ -107,14 +117,23 @@ final class ConversionStore {
                 collectionId: exchange.collectionId,
                 token: token
             ) {
+                logURL = metadata.logUrl
                 switch metadata.status {
                 case .completed:
                     await downloadArtifact(metadata: metadata, auth: auth)
                 case .running:
-                    state = .running(ConversionActivity(since: Date()))
+                    // The service's own start time, so opening this screen on a conversion someone
+                    // else began reports how long it has really been running.
+                    state = .running(ConversionActivity(since: metadata.startedOrCreatedAt ?? Date()))
                     startPolling(auth: auth)
                 case .failed:
-                    state = .failed(metadata.error ?? "The conversion failed on the service.")
+                    state = .failed(metadata.error?.userFacingText ?? "The conversion failed on the service.")
+                case .superseded:
+                    // The cached file was produced from the version that has just been superseded,
+                    // so it would preview last week's geometry behind a "ready" badge.
+                    cache.delete(for: exchange.cacheKeyUrn)
+                    cachedUSDzURL = nil
+                    state = .superseded
                 }
             } else {
                 state = .notConverted
@@ -130,9 +149,24 @@ final class ConversionStore {
         logText = ""
         do {
             let token = try await auth.validAccessToken()
-            try await api.start(urn: exchange.exchangeUrn, collectionId: exchange.collectionId, token: token)
-        } catch ConversionError.conflict {
-            // another client already started a conversion; fall through to polling its progress
+            // The service answers with the job's state, adopting a conversion another client had
+            // already started rather than refusing with a 409 the way it used to.
+            let metadata = try await api.start(
+                urn: exchange.exchangeUrn,
+                collectionId: exchange.collectionId,
+                token: token
+            )
+            logURL = metadata?.logUrl
+
+            // Nothing to wait for when the conversion has already finished — which is what a
+            // `force`-less retry over a completed job returns.
+            if let metadata, metadata.status == .completed {
+                await downloadArtifact(metadata: metadata, auth: auth)
+                return
+            }
+            if let since = metadata?.startedOrCreatedAt {
+                state = .running(ConversionActivity(since: since))
+            }
         } catch {
             report(error, auth: auth)
             return
@@ -202,15 +236,18 @@ final class ConversionStore {
     private func pollStatusOnce(auth: AuthManager, deadline: Date) async -> Bool {
         do {
             let token = try await auth.validAccessToken()
-            guard let metadata = try await api.status(
+            let polled = try await api.status(
                 urn: exchange.exchangeUrn,
                 collectionId: exchange.collectionId,
                 token: token
-            ) else {
-                // The service no longer has a conversion for this exchange: another client
-                // deleted it, or a new version of the exchange was published and superseded it.
-                // Either way there is nothing left to wait for, and polling to the deadline
-                // would just spend half an hour on a conversion that is gone.
+            )
+            logURL = polled?.logUrl
+            guard let metadata = polled else {
+                // The service no longer has a conversion for this exchange, which now means only
+                // one thing: another client deleted it. A conversion invalidated by a newly
+                // published version arrives as `.superseded` instead of as a 404. Either way
+                // there is nothing left to wait for, and polling to the deadline would just spend
+                // half an hour on a conversion that is gone.
                 state = .notConverted
                 return false
             }
@@ -219,10 +256,22 @@ final class ConversionStore {
                 await downloadArtifact(metadata: metadata, auth: auth)
                 return false
             case .failed:
-                state = .failed(metadata.error ?? "The conversion failed on the service.")
+                state = .failed(metadata.error?.userFacingText ?? "The conversion failed on the service.")
+                return false
+            case .superseded:
+                // A new version was published while this conversion was running, so what it is
+                // producing is already out of date. Nothing left to wait for.
+                state = .superseded
                 return false
             case .running:
-                break
+                // The first POST answers 202 with no body, so the wait starts out measured from
+                // this app's clock; the first status that carries a start time corrects it.
+                if let since = metadata.startedOrCreatedAt,
+                   var activity = self.activity,
+                   activity.since != since {
+                    activity.since = since
+                    state = .running(activity)
+                }
             }
         } catch {
             report(error, auth: auth)
@@ -242,12 +291,14 @@ final class ConversionStore {
     }
 
     private func downloadArtifact(metadata: ConversionMetadata, auth: AuthManager) async {
-        guard let fileName = ConversionAPI.findArtifact(metadata, extension: ".usdz") else {
+        guard let artifact = ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz) else {
             state = .failed("The conversion finished without producing a USDZ file.")
             return
         }
         var activity = self.activity ?? ConversionActivity(since: Date())
-        activity.phase = .downloading(receivedBytes: 0, totalBytes: nil)
+        // The service reports the size up front, so the progress bar is determinate from the
+        // first byte instead of waiting on a Content-Length to arrive with the response headers.
+        activity.phase = .downloading(receivedBytes: 0, totalBytes: artifact.size)
         state = .running(activity)
         do {
             let token = try await auth.validAccessToken()
@@ -255,9 +306,9 @@ final class ConversionStore {
             // to the URLSession task and is released with it, so it can neither outlive the
             // download nor form a cycle — the store never holds the delegate.
             let downloaded = try await api.downloadArtifact(
+                artifact: artifact,
                 urn: exchange.exchangeUrn,
                 collectionId: exchange.collectionId,
-                fileName: fileName,
                 token: token
             ) { [store = self] received, total in
                 // Delivered on URLSession's delegate queue, so this hops back to the actor that
@@ -293,7 +344,11 @@ final class ConversionStore {
     /// finished or was cancelled can't resurrect the running state.
     private func reportDownload(received: Int64, total: Int64?) {
         guard var activity = self.activity,
-              case .downloading(let reported, _) = activity.phase else { return }
+              case .downloading(let reported, let declared) = activity.phase else { return }
+        // The size the service declared wins over the transfer's own count, which is
+        // `NSURLSessionTransferSizeUnknown` for a response without a Content-Length — arriving
+        // as nil here, and previously wiping out a total the status had already supplied.
+        let total = declared ?? total
         let step = max((total ?? 0) / 100, 1 << 20)
         guard received - reported >= step || received == total else { return }
         activity.phase = .downloading(receivedBytes: received, totalBytes: total)
@@ -339,10 +394,10 @@ final class ConversionStore {
     private func refreshLogOnce(auth: AuthManager) async -> LogRefresh {
         var grew = false
         if let token = try? await auth.validAccessToken() {
-            let chunk = try? await api.artifactChunk(
+            let chunk = try? await api.logChunk(
                 urn: exchange.exchangeUrn,
                 collectionId: exchange.collectionId,
-                fileName: "log.txt",
+                presignedUrl: logURL,
                 token: token,
                 from: logData.count
             )

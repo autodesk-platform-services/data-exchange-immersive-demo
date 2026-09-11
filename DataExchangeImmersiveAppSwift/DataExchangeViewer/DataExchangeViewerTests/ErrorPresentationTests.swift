@@ -75,7 +75,6 @@ struct ErrorPresentationTests {
     /// perfectly good session.
     @Test func doesNotTreatOtherFailuresAsAnExpiredSession() {
         #expect(!ConversionError.forbidden.indicatesExpiredSession)
-        #expect(!ConversionError.conflict.indicatesExpiredSession)
         #expect(!ConversionError.http(500, "").indicatesExpiredSession)
         #expect(!GraphQLError.http(403, "").indicatesExpiredSession)
         #expect(!GraphQLError.noData.indicatesExpiredSession)

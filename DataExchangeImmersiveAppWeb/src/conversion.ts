@@ -10,10 +10,64 @@ const BASE_URL = (
   new URL(window.location.href).searchParams.get("service") ?? DEFAULT_BASE_URL
 ).replace(/\/+$/, "");
 
+// One file produced by a conversion. The service describes each artifact rather than just naming
+// it, so a caller selects one by `type` instead of matching a file-name suffix, and knows the
+// download size before the first byte arrives.
+export interface ConversionArtifact {
+  name: string;
+  type: "obj" | "mtl" | "glb" | "usdz" | "log" | "unknown";
+  contentType: string;
+  size: number;
+  checksum?: string | null;
+  // Absolute URL carrying the job's secret, so it needs no Authorization header and can be given
+  // straight to a `src` attribute. Absent only for a conversion produced by an older build of the
+  // service, which is why callers still fall back to an authenticated fetch.
+  url?: string | null;
+}
+
+// Why a conversion failed. `error` used to be a single string built from the server's
+// `exception.ToString()` — type, message, stack trace and inner exceptions. The stack trace now
+// stays in the conversion log.
+export interface ConversionFailure {
+  // One sentence, written to be shown to whoever is looking at the screen.
+  message: string;
+  // Which step failed, as a stable identifier rather than prose.
+  step?: string | null;
+  // The exception's type and message. Not its stack trace.
+  detail?: string | null;
+}
+
 export interface ConversionStatus {
-  status: "running" | "completed" | "failed";
-  artifacts: string[];
-  error?: string | null;
+  // "superseded" means the conversion finished, but of a version the exchange has since moved past:
+  // its artifacts are not served and a new conversion is what resolves it. Previously reported as a
+  // 404, indistinguishable from an exchange nobody had ever converted.
+  status: "running" | "completed" | "failed" | "superseded";
+  artifacts: ConversionArtifact[];
+  error?: ConversionFailure | null;
+  // The version the artifacts were produced from, and — when superseded — the version the exchange
+  // is at now.
+  fileVersionUrn?: string | null;
+  currentFileVersionUrn?: string | null;
+  // Presigned URL for the conversion log. The log is not an artifact, so it is named here rather
+  // than found in `artifacts` — which is what this client used to do, by the hardcoded name
+  // "log.txt".
+  logUrl?: string | null;
+  // ISO 8601, UTC, second resolution (e.g. "2026-09-10T12:04:12Z"). `updatedAt` advances at every
+  // step of the pipeline, so a `running` job whose `updatedAt` has stopped moving is one whose
+  // conversion process is gone.
+  createdAt?: string | null;
+  startedAt?: string | null;
+  updatedAt?: string | null;
+  completedAt?: string | null;
+}
+
+// How long a conversion has been running, or how long it took. Returns null when the service
+// reported no timestamps — a conversion written by an older build of the service.
+export function conversionDuration(status: ConversionStatus, now: number = Date.now()): number | null {
+  const start = status.startedAt ?? status.createdAt;
+  if (!start) return null;
+  const end = status.completedAt ? Date.parse(status.completedAt) : now;
+  return Math.max(0, end - Date.parse(start));
 }
 
 // The service addresses a conversion job by one path segment: the base64url encoding of
@@ -35,15 +89,26 @@ function jobEndpoint(urn: string, collectionId: string): string {
   return `${BASE_URL}/api/jobs/${jobId(collectionId, urn)}`;
 }
 
-// Kicks off a conversion. The service responds 202 Accepted and runs the work in the background.
-export async function startConversion(token: string, urn: string, collectionId: string): Promise<void> {
-  const response = await fetch(jobEndpoint(urn, collectionId), {
+// Starts a conversion, or adopts the one already running or already finished, and returns the job's
+// state as the service reports it. Idempotent: the service used to answer 409 when a conversion
+// existed, so the only way to ask again was to DELETE first.
+//
+// `force` discards whatever is stored and converts again, which is the only way to re-run over a
+// conversion that has already completed.
+export async function startConversion(
+  token: string,
+  urn: string,
+  collectionId: string,
+  force = false,
+): Promise<ConversionStatus> {
+  const response = await fetch(`${jobEndpoint(urn, collectionId)}${force ? "?force=true" : ""}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
     throw new Error(`Failed to start conversion: ${response.status} ${await response.text()}`);
   }
+  return (await response.json()) as ConversionStatus;
 }
 
 // Deletes the results of a previous conversion so a new one can be started for this exchange.
@@ -69,45 +134,31 @@ export async function getStatus(token: string, urn: string, collectionId: string
   return (await response.json()) as ConversionStatus;
 }
 
-async function fetchArtifact(token: string, urn: string, collectionId: string, fileName: string): Promise<Response> {
-  const response = await fetch(
-    `${jobEndpoint(urn, collectionId)}/artifacts/${encodeURIComponent(fileName)}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  );
+// Downloads the conversion log. Prefers the presigned `logUrl` from the status, which needs no
+// Authorization header, and falls back to the job's log sub-resource with the bearer token for a
+// conversion produced before the service supplied one.
+export async function fetchLogText(
+  token: string,
+  urn: string,
+  collectionId: string,
+  status: ConversionStatus,
+): Promise<string> {
+  const response = status.logUrl
+    ? await fetch(status.logUrl)
+    : await fetch(`${jobEndpoint(urn, collectionId)}/log`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
   if (!response.ok) {
-    throw new Error(`Failed to fetch artifact ${fileName}: ${response.status}`);
+    throw new Error(`Failed to fetch the conversion log: ${response.status}`);
   }
-  return response;
+  return response.text();
 }
 
-// Downloads a single artifact and returns an object URL. The <model-viewer>/<model> `src`
-// attributes cannot send an Authorization header, so we fetch the bytes here and hand the
-// elements a blob URL instead. Callers must revokeObjectUrl() the result when done.
-export async function fetchArtifactBlob(
-  token: string,
-  urn: string,
-  collectionId: string,
-  fileName: string,
-): Promise<string> {
-  return URL.createObjectURL(await (await fetchArtifact(token, urn, collectionId, fileName)).blob());
-}
-
-// Downloads a text artifact (e.g. log.txt) and returns its contents as a string.
-export async function fetchArtifactText(
-  token: string,
-  urn: string,
-  collectionId: string,
-  fileName: string,
-): Promise<string> {
-  return (await fetchArtifact(token, urn, collectionId, fileName)).text();
-}
-
-// Picks the first artifact with the given extension (e.g. ".glb", ".usdz"), or undefined.
+// Picks the first artifact of the given type (e.g. "glb", "usdz"), or undefined. Selection is by
+// type rather than by file name, which is derived from the exchange's contents and unpredictable.
 export function findArtifact(
   status: ConversionStatus | null | undefined,
-  extension: string,
-): string | undefined {
-  return status?.artifacts.find((name) => name.toLowerCase().endsWith(extension));
+  type: ConversionArtifact["type"],
+): ConversionArtifact | undefined {
+  return status?.artifacts.find((artifact) => artifact.type === type);
 }
