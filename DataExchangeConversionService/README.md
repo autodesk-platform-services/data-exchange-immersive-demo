@@ -67,6 +67,10 @@ The endpoint will return JSON object with extraction metadata:
   "error": null,          // Error message in case "status" is "failed"
   "fileVersionUrn": "urn:adsk.wipprod:fs.file:vf.lbJRla4QRhO-Xnu-1bEg5Q?version=3",
                           // The exchange version these artifacts were produced from
+  "createdAt": "2026-09-10T12:00:00Z",   // When the job was accepted
+  "startedAt": "2026-09-10T12:00:01Z",   // When conversion work began; null until it does
+  "updatedAt": "2026-09-10T12:04:12Z",   // Bumped at every step of the pipeline
+  "completedAt": "2026-09-10T12:04:12Z", // When it finished or failed; null while running
   "artifacts": [          // Generated artifacts, described rather than just named
     {
       "name": "foo.usdz",
@@ -83,6 +87,11 @@ A job ID that is not valid base64url, or that does not decode to a `{collectionI
 
 Select an artifact by its `type` rather than by parsing `name` — the file names are derived from
 the exchange's contents and are not predictable.
+
+Timestamps are ISO 8601, UTC, second resolution (`2026-09-10T12:04:12Z`). `updatedAt` moves at
+every step of the pipeline, so it doubles as a liveness heartbeat: a job still reporting `running`
+whose `updatedAt` has stopped advancing is one whose conversion process is gone — the background
+task does not survive a restart of the service, but the metadata it left behind does.
 
 The endpoint returns `404 Not Found` when there is no conversion for the exchange — *including* when the only stored conversion was produced from a version the exchange has since moved past. An exchange's lineage URN doesn't change when a new version is published, but its contents do, so a stale conversion is reported as absent rather than as the current one. Requesting a new conversion (`POST`) discards the superseded artifacts and converts the current version; artifact fetches are gated the same way, so a stale USDZ is never served.
 

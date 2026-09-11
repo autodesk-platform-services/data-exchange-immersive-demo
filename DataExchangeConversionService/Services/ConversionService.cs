@@ -14,7 +14,10 @@ public sealed class ConversionService
 {
     private const string MetadataFileName = "metadata.json";
     private const string LogFileName = "log.txt";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new Iso8601UtcConverter() }
+    };
 
     private readonly IWebHostEnvironment _environment;
     private readonly Options.Options _options;
@@ -107,11 +110,14 @@ public sealed class ConversionService
         var logPath = Path.Combine(outputFolder, LogFileName);
         File.WriteAllText(logPath, string.Empty);
 
+        var now = DateTimeOffset.UtcNow;
         var metadata = new ConversionMetadata
         {
             // Described again when the conversion settles, because the log grows while it runs.
             Artifacts = [ConversionArtifact.Describe(logPath)],
-            FileVersionUrn = exchange.FileVersionUrn
+            FileVersionUrn = exchange.FileVersionUrn,
+            CreatedAt = now,
+            UpdatedAt = now
         };
         WriteMetadata(outputFolder, metadata);
         _ = Task.Run(() => RunObjConversionAsync(exchange.Job, bearerToken, outputFolder, metadata));
@@ -162,12 +168,18 @@ public sealed class ConversionService
             File.AppendAllText(logPath, $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
         }
 
+        // Each step persists the metadata as well as logging, so UpdatedAt is a heartbeat a
+        // reader can trust: a "running" job that has stopped moving it is one whose process is
+        // gone. Writing metadata.json is a few hundred bytes against a step that takes seconds.
         void Step(string description)
         {
             currentStep = description;
             Log($"Step: {description}.");
+            metadata.UpdatedAt = DateTimeOffset.UtcNow;
+            WriteMetadata(outputFolder, metadata);
         }
 
+        metadata.StartedAt = DateTimeOffset.UtcNow;
         Log("Starting OBJ conversion.");
 
         try
@@ -279,6 +291,7 @@ public sealed class ConversionService
             ForceFullGarbageCollection(_logger, "USD to USDZ bundling");
 
             metadata.Status = ConversionStatus.Completed;
+            metadata.CompletedAt = DateTimeOffset.UtcNow;
             Log($"Exchange conversion completed. Artifacts: {string.Join(", ", metadata.Artifacts.Select(artifact => artifact.Name))}.");
         }
         catch (Exception ex)
@@ -287,6 +300,7 @@ public sealed class ConversionService
             File.AppendAllText(logPath, $"{DateTimeOffset.UtcNow:O} [Error] Failed while {currentStep}.{Environment.NewLine}{ex}{Environment.NewLine}");
 
             metadata.Status = ConversionStatus.Failed;
+            metadata.CompletedAt = DateTimeOffset.UtcNow;
             // Persist the failing step and the full exception (type, message, stack trace,
             // inner exceptions) so the failure is diagnosable from metadata.json alone.
             metadata.Error = $"Failed while {currentStep}. {ex}";
@@ -295,6 +309,7 @@ public sealed class ConversionService
         // Nothing appends to the log past this point, so its recorded size and digest now
         // describe the finished file rather than the empty one the job started with.
         RecordArtifact(metadata, logPath);
+        metadata.UpdatedAt = DateTimeOffset.UtcNow;
         WriteMetadata(outputFolder, metadata);
     }
 

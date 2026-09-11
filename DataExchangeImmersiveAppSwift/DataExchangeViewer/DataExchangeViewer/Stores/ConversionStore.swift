@@ -23,9 +23,10 @@ struct ConversionActivity {
         case downloading(receivedBytes: Int64, totalBytes: Int64?)
     }
 
-    /// When the app started waiting — not when the service started converting, which it doesn't
-    /// report. Enough for an elapsed-time readout that shows the wait is still moving.
-    let since: Date
+    /// When the service started converting, as the service reports it. Falls back to the moment
+    /// the app started waiting for a job it has not yet had a status for — the first `POST`
+    /// answers 202 with no body, so the real time arrives with the first poll and replaces this.
+    var since: Date
     var phase: Phase = .converting
 
     /// Progress in 0...1, or nil when it can't be known: throughout the conversion phase, and
@@ -111,7 +112,9 @@ final class ConversionStore {
                 case .completed:
                     await downloadArtifact(metadata: metadata, auth: auth)
                 case .running:
-                    state = .running(ConversionActivity(since: Date()))
+                    // The service's own start time, so opening this screen on a conversion someone
+                    // else began reports how long it has really been running.
+                    state = .running(ConversionActivity(since: metadata.startedOrCreatedAt ?? Date()))
                     startPolling(auth: auth)
                 case .failed:
                     state = .failed(metadata.error ?? "The conversion failed on the service.")
@@ -222,7 +225,14 @@ final class ConversionStore {
                 state = .failed(metadata.error ?? "The conversion failed on the service.")
                 return false
             case .running:
-                break
+                // The first POST answers 202 with no body, so the wait starts out measured from
+                // this app's clock; the first status that carries a start time corrects it.
+                if let since = metadata.startedOrCreatedAt,
+                   var activity = self.activity,
+                   activity.since != since {
+                    activity.since = since
+                    state = .running(activity)
+                }
             }
         } catch {
             report(error, auth: auth)

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { getStoredToken, handleCallback, login, logout } from "./auth.ts";
 import { getExchanges, getHubs, getProjects, type Exchange, type Hub, type Project } from "./aps.ts";
 import {
+  conversionDuration,
   deleteConversion,
   fetchArtifactBlob,
   fetchArtifactText,
@@ -429,6 +430,35 @@ function LogsTab({
 }
 
 // ---------------------------------------------------------------------------
+// Conversion duration: how long it has been running, or how long it took
+// ---------------------------------------------------------------------------
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+// The service reports when it started, so the readout is the conversion's real age rather than
+// how long this tab has been open. Its own component, and its own 1s tick, so the surrounding
+// pane isn't re-rendered once a second while a conversion runs.
+function ConversionDuration({ status }: { status: ConversionStatus }) {
+  const isRunning = status.status === "running";
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [isRunning]);
+
+  const duration = conversionDuration(status, now);
+  if (duration === null) return null;
+  return <span className="duration">{formatDuration(duration)}</span>;
+}
+
+// ---------------------------------------------------------------------------
 // Main pane: exchange preview — tabs + conversion controls
 // ---------------------------------------------------------------------------
 
@@ -469,7 +499,7 @@ function MainPane({
 
   async function convert() {
     await startConversion(token, urn, collectionId);
-    setStatus({ status: "running", artifacts: [] });
+    setStatus({ status: "running", artifacts: [], startedAt: new Date().toISOString() });
   }
 
   async function remove() {
@@ -486,6 +516,7 @@ function MainPane({
         <span className="pane-title pane-title-centered">{exchange.name}</span>
         <div className="conversion">
           {status && <span className={`status ${status.status}`}>{status.status}</span>}
+          {status && <ConversionDuration status={status} />}
           {status?.error && <span className="error">{status.error}</span>}
           {status ? (
             <button className="secondary" onClick={() => void remove()} disabled={status.status === "running"}>

@@ -28,6 +28,31 @@ struct ConversionMetadata: Decodable {
     let status: ConversionStatusValue
     let artifacts: [ConversionArtifact]
     let error: String?
+
+    /// When the service accepted the job.
+    let createdAt: Date?
+    /// When the service began converting. Null until it does.
+    let startedAt: Date?
+    /// Last time the service moved the job along. Advances at every step of the pipeline.
+    let updatedAt: Date?
+    /// When the job finished or failed. Null while it is still running.
+    let completedAt: Date?
+
+    /// How long the conversion has been running, measured against the service's clock rather than
+    /// this app's — the elapsed-time readout used to start when the *screen* opened, which for an
+    /// exchange someone else was already converting was arbitrarily short.
+    var startedOrCreatedAt: Date? { startedAt ?? createdAt }
+}
+
+extension JSONDecoder {
+    /// Decodes the conversion service's documents. The service writes timestamps as
+    /// `2026-09-10T12:04:12Z`, which is what `.iso8601` expects — second resolution, no fractional
+    /// part, so neither side has to agree on a format beyond the standard one.
+    static let conversionService: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
 }
 
 /// The artifact types the app looks for. The service can produce others (`obj`, `mtl`, `log`);

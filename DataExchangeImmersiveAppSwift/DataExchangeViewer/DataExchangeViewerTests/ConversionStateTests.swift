@@ -15,6 +15,24 @@ struct ConversionStateTests {
         ConversionArtifact(name: name, type: type, contentType: "application/octet-stream", size: size, checksum: nil)
     }
 
+    private func metadata(
+        status: ConversionStatusValue,
+        artifacts: [ConversionArtifact] = [],
+        error: String? = nil,
+        createdAt: Date? = nil,
+        startedAt: Date? = nil
+    ) -> ConversionMetadata {
+        ConversionMetadata(
+            status: status,
+            artifacts: artifacts,
+            error: error,
+            createdAt: createdAt,
+            startedAt: startedAt,
+            updatedAt: nil,
+            completedAt: nil
+        )
+    }
+
     // MARK: - Metadata
 
     @Test func decodesACompletedConversion() throws {
@@ -64,20 +82,48 @@ struct ConversionStateTests {
         }
     }
 
+    @Test func decodesTheServiceTimestamps() throws {
+        let json = """
+        {
+          "status": "running",
+          "artifacts": [],
+          "error": null,
+          "createdAt": "2026-09-10T12:00:00Z",
+          "startedAt": "2026-09-10T12:00:01Z",
+          "updatedAt": "2026-09-10T12:04:12Z",
+          "completedAt": null
+        }
+        """
+        let metadata = try JSONDecoder.conversionService.decode(ConversionMetadata.self, from: Data(json.utf8))
+        #expect(metadata.createdAt == Date(timeIntervalSince1970: 1_789_041_600))
+        #expect(metadata.startedAt == Date(timeIntervalSince1970: 1_789_041_601))
+        #expect(metadata.updatedAt == Date(timeIntervalSince1970: 1_789_041_852))
+        #expect(metadata.completedAt == nil)
+    }
+
+    /// A conversion that has not begun yet still has a creation time to measure the wait from.
+    @Test func fallsBackToTheCreationTimeBeforeTheConversionStarts() {
+        let created = Date(timeIntervalSince1970: 1_789_041_600)
+        #expect(metadata(status: .running, createdAt: created).startedOrCreatedAt == created)
+
+        let started = created.addingTimeInterval(1)
+        #expect(metadata(status: .running, createdAt: created, startedAt: started).startedOrCreatedAt == started)
+        #expect(metadata(status: .running).startedOrCreatedAt == nil)
+    }
+
     // MARK: - Artifact selection
 
     /// Selection is by `type`, not by file-name suffix: the names come from the exchange's
     /// contents and are not predictable, and an exchange called `Plans.usdz.rvt` should not be
     /// mistaken for a model.
     @Test func findsTheUSDZAmongTheArtifacts() {
-        let metadata = ConversionMetadata(
+        let metadata = metadata(
             status: .completed,
             artifacts: [
                 artifact(name: "log.txt", type: "log"),
                 artifact(name: "Basement.obj", type: "obj"),
                 artifact(name: "Basement.usdz", type: "usdz", size: 1_024),
-            ],
-            error: nil
+            ]
         )
         #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz)?.name == "Basement.usdz")
         #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz)?.size == 1_024)
@@ -87,11 +133,7 @@ struct ConversionStateTests {
     /// A conversion that reports success without producing a model is a failure the detail view
     /// has to explain, so this must not return something unusable.
     @Test func reportsNoUSDZWhenTheConversionProducedNone() {
-        let metadata = ConversionMetadata(
-            status: .completed,
-            artifacts: [artifact(name: "log.txt", type: "log")],
-            error: nil
-        )
+        let metadata = metadata(status: .completed, artifacts: [artifact(name: "log.txt", type: "log")])
         #expect(ConversionAPI.findArtifact(metadata, type: ArtifactType.usdz) == nil)
         #expect(ConversionAPI.findArtifact(nil, type: ArtifactType.usdz) == nil)
     }

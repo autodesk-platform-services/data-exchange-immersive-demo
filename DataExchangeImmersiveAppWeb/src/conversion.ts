@@ -25,6 +25,22 @@ export interface ConversionStatus {
   status: "running" | "completed" | "failed";
   artifacts: ConversionArtifact[];
   error?: string | null;
+  // ISO 8601, UTC, second resolution (e.g. "2026-09-10T12:04:12Z"). `updatedAt` advances at every
+  // step of the pipeline, so a `running` job whose `updatedAt` has stopped moving is one whose
+  // conversion process is gone.
+  createdAt?: string | null;
+  startedAt?: string | null;
+  updatedAt?: string | null;
+  completedAt?: string | null;
+}
+
+// How long a conversion has been running, or how long it took. Returns null when the service
+// reported no timestamps — a conversion written by an older build of the service.
+export function conversionDuration(status: ConversionStatus, now: number = Date.now()): number | null {
+  const start = status.startedAt ?? status.createdAt;
+  if (!start) return null;
+  const end = status.completedAt ? Date.parse(status.completedAt) : now;
+  return Math.max(0, end - Date.parse(start));
 }
 
 // The service addresses a conversion job by one path segment: the base64url encoding of

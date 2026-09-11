@@ -39,7 +39,7 @@ struct ConversionAPI {
         let http = response as? HTTPURLResponse
         switch http?.statusCode {
         case 404: return nil
-        case 200: return try JSONDecoder().decode(ConversionMetadata.self, from: data)
+        case 200: return try JSONDecoder.conversionService.decode(ConversionMetadata.self, from: data)
         default: throw errorForStatus(http, data: data)
         }
     }
