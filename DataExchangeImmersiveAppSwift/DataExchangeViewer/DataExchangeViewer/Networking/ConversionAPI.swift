@@ -49,15 +49,20 @@ struct ConversionAPI {
         }
     }
 
-    func start(urn: String, collectionId: String, token: String) async throws {
+    /// Starts a conversion, or adopts the one already running or already finished, and returns the
+    /// job's state as the service reports it.
+    ///
+    /// The call is idempotent — it used to answer 409 when a conversion existed, which meant the
+    /// only way to ask again was to DELETE first. Returns nil if the service answers 202 without a
+    /// body, which is what an older build does.
+    func start(urn: String, collectionId: String, token: String) async throws -> ConversionMetadata? {
         var request = URLRequest(url: endpoint(urn: urn, collectionId: collectionId))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
         let http = response as? HTTPURLResponse
         switch http?.statusCode {
-        case 202: return
-        case 409: throw ConversionError.conflict
+        case 202: return try? JSONDecoder.conversionService.decode(ConversionMetadata.self, from: data)
         default: throw errorForStatus(http, data: data)
         }
     }

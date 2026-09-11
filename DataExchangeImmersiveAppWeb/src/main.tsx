@@ -495,8 +495,9 @@ function MainPane({
   }, [token, urn, collectionId, status?.status]);
 
   async function convert() {
-    await startConversion(token, urn, collectionId);
-    setStatus({ status: "running", artifacts: [], startedAt: new Date().toISOString() });
+    // The service answers with the job's real state rather than just "accepted", so there is no
+    // need to fabricate a running status and wait for the first poll to correct it.
+    setStatus(await startConversion(token, urn, collectionId));
   }
 
   async function remove() {

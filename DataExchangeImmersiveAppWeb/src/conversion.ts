@@ -77,15 +77,26 @@ function jobEndpoint(urn: string, collectionId: string): string {
   return `${BASE_URL}/api/jobs/${jobId(collectionId, urn)}`;
 }
 
-// Kicks off a conversion. The service responds 202 Accepted and runs the work in the background.
-export async function startConversion(token: string, urn: string, collectionId: string): Promise<void> {
-  const response = await fetch(jobEndpoint(urn, collectionId), {
+// Starts a conversion, or adopts the one already running or already finished, and returns the job's
+// state as the service reports it. Idempotent: the service used to answer 409 when a conversion
+// existed, so the only way to ask again was to DELETE first.
+//
+// `force` discards whatever is stored and converts again, which is the only way to re-run over a
+// conversion that has already completed.
+export async function startConversion(
+  token: string,
+  urn: string,
+  collectionId: string,
+  force = false,
+): Promise<ConversionStatus> {
+  const response = await fetch(`${jobEndpoint(urn, collectionId)}${force ? "?force=true" : ""}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
     throw new Error(`Failed to start conversion: ${response.status} ${await response.text()}`);
   }
+  return (await response.json()) as ConversionStatus;
 }
 
 // Deletes the results of a previous conversion so a new one can be started for this exchange.

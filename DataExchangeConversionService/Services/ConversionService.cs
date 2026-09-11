@@ -3,6 +3,7 @@ using DataExchangeConversionService.Options;
 using Autodesk.DataExchange;
 using Autodesk.DataExchange.Core.Models;
 using Microsoft.Extensions.Options;
+using System.Collections.Concurrent;
 using System.Runtime;
 using System.Security.Cryptography;
 using System.Text;
@@ -19,6 +20,17 @@ public sealed class ConversionService
     {
         Converters = { new Iso8601UtcConverter() }
     };
+
+    // Statuses whose stored conversion answers a new request on its own: one is already running,
+    // the other already produced the artifacts.
+    //
+    // "failed" is deliberately not among them. A failed attempt is not a result worth keeping, and
+    // a client asking again is asking for a retry — which is what the visionOS Retry button was
+    // already trying to do, only to get a 409, swallow it, and poll the same failure back onto the
+    // screen. "superseded" is not among them either: it is the very case a new conversion resolves.
+    private static readonly string[] ReusableStatuses = [ConversionStatus.Running, ConversionStatus.Completed];
+
+    private static readonly ConcurrentDictionary<string, object> StartGates = new();
 
     private readonly IWebHostEnvironment _environment;
     private readonly Options.Options _options;
@@ -103,26 +115,53 @@ public sealed class ConversionService
         return metadata is not null && metadata.Status != ConversionStatus.Superseded;
     }
 
-    public void StartObjConversion(ExchangeIdentity exchange, string bearerToken)
+    // Starts a conversion for the job, or returns the one that already answers the request.
+    //
+    // Asking for a conversion that is already running, or already finished, is not an error: the
+    // state the caller wants either is being reached or has been. It used to be a 409, which meant
+    // a client had to DELETE before it could ask again — and both clients simply worked around it.
+    // `force` discards whatever is stored and converts again regardless.
+    public ConversionMetadata StartConversion(ExchangeIdentity exchange, string bearerToken, bool force)
     {
         var outputFolder = GetJobOutputFolder(exchange.Job);
-        if (Directory.Exists(outputFolder))
+
+        // Serialises the decision with the start, so two requests arriving together cannot both
+        // conclude they should convert and then write into the same folder. Static because the
+        // service is scoped to a request. Single-process only: it does not coordinate across App
+        // Service instances, and the entry per job is never reclaimed — both acceptable for a
+        // demo-scale service, neither a substitute for a real conversion queue.
+        lock (StartGates.GetOrAdd(exchange.Job.CanonicalForm, _ => new object()))
         {
-            if (IsUsable(GetStatus(exchange)))
+            var existing = GetStatus(exchange);
+            if (!force && IsUsable(existing) && ReusableStatuses.Contains(existing!.Status))
             {
-                throw new InvalidOperationException($"Conversion already in progress for exchange {exchange.Job.ExchangeUrn}. Delete the current conversion first if you want to start it again.");
+                _logger.LogInformation(
+                    "Reusing the {Status} conversion of exchange {ExchangeUrn}.",
+                    existing.Status,
+                    exchange.Job.ExchangeUrn);
+                return existing;
             }
 
-            // Anything still on disk was produced from a version that has since been superseded
-            // (the caller has already been told about a conversion of the current one). Replacing
-            // it keeps one folder per exchange rather than accumulating a copy of every version
-            // ever converted — these artifacts run to hundreds of megabytes each.
-            _logger.LogInformation(
-                "Discarding a conversion of a superseded version of exchange {ExchangeUrn}.",
-                exchange.Job.ExchangeUrn);
-            DeleteFolderIfExists(outputFolder);
-        }
+            if (Directory.Exists(outputFolder))
+            {
+                // Replacing keeps one folder per job rather than accumulating a copy of every
+                // version ever converted — these artifacts run to hundreds of megabytes each.
+                _logger.LogInformation(
+                    "Discarding the stored conversion of exchange {ExchangeUrn} ({Reason}).",
+                    exchange.Job.ExchangeUrn,
+                    force ? "forced" : existing?.Status ?? "unreadable");
+                DeleteFolderIfExists(outputFolder);
+            }
 
+            return StartConversionCore(exchange, bearerToken, outputFolder);
+        }
+    }
+
+    private ConversionMetadata StartConversionCore(
+        ExchangeIdentity exchange,
+        string bearerToken,
+        string outputFolder)
+    {
         Directory.CreateDirectory(outputFolder);
 
         // Mark the conversion as running, then run it in the background.
@@ -148,6 +187,7 @@ public sealed class ConversionService
         };
         WriteMetadata(outputFolder, metadata);
         _ = Task.Run(() => RunObjConversionAsync(exchange.Job, bearerToken, outputFolder, metadata));
+        return metadata;
     }
 
     public void DeleteObjConversion(JobId job)

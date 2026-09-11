@@ -81,7 +81,6 @@ enum ArtifactType {
 enum ConversionError: Error {
     case unauthorized
     case forbidden
-    case conflict
     case http(Int, String)
 }
 
@@ -96,8 +95,6 @@ extension ConversionError: LocalizedError {
             return "Your session expired."
         case .forbidden:
             return "You don't have access to this exchange."
-        case .conflict:
-            return "This exchange is already being converted."
         case .http(let status, let body):
             let detail = Self.detail(fromResponseBody: body)
             return detail.map { "The conversion service returned an error: \($0)" }
@@ -111,8 +108,6 @@ extension ConversionError: LocalizedError {
             return "Sign in again to continue."
         case .forbidden:
             return "Ask the project administrator to grant you access, then try again."
-        case .conflict:
-            return "Wait for the conversion in progress to finish."
         case .http:
             return "Check that the conversion service is running, then try again."
         }

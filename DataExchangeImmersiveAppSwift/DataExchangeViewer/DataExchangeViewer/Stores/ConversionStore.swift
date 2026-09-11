@@ -149,9 +149,24 @@ final class ConversionStore {
         logText = ""
         do {
             let token = try await auth.validAccessToken()
-            try await api.start(urn: exchange.exchangeUrn, collectionId: exchange.collectionId, token: token)
-        } catch ConversionError.conflict {
-            // another client already started a conversion; fall through to polling its progress
+            // The service answers with the job's state, adopting a conversion another client had
+            // already started rather than refusing with a 409 the way it used to.
+            let metadata = try await api.start(
+                urn: exchange.exchangeUrn,
+                collectionId: exchange.collectionId,
+                token: token
+            )
+            logURL = metadata?.logUrl
+
+            // Nothing to wait for when the conversion has already finished — which is what a
+            // `force`-less retry over a completed job returns.
+            if let metadata, metadata.status == .completed {
+                await downloadArtifact(metadata: metadata, auth: auth)
+                return
+            }
+            if let since = metadata?.startedOrCreatedAt {
+                state = .running(ConversionActivity(since: since))
+            }
         } catch {
             report(error, auth: auth)
             return

@@ -44,8 +44,17 @@ Authorization: Bearer {{AccessToken}}
 | --- | --- | --- |
 | `{{jobId}}` | Job ID, as described under [Job IDs](#job-ids) | `Yi4xMjM0NTY3OC1hYmNkLTEyMzQt...` |
 | `{{AccessToken}}` | access token that has a read access to your exchange | `eyJhb...` |
+| `force` | Optional query parameter. `true` discards whatever is stored and converts again | `?force=true` |
 
-The endpoint will return `202 Accepted` to indicate that the conversion has started in the background.
+The endpoint returns `202 Accepted` with the job's current state — the same document the status
+endpoint returns — so a caller learns whether it is waiting on a fresh conversion or can go
+straight to the artifacts without a second request.
+
+The call is idempotent. Asking for a conversion that is already `running`, or already `completed`,
+returns that conversion and starts nothing: the state you asked for either is being reached or has
+been. A `failed` or `superseded` conversion is replaced, since neither is a result worth keeping —
+so retrying a failure is just another `POST`, with no `DELETE` first. Pass `?force=true` to convert
+again over a `completed` conversion.
 
 ### Checking status of an extraction
 

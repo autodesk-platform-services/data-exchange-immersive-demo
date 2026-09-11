@@ -35,28 +35,27 @@ public sealed class JobsController : ControllerBase
         return Ok(status);
     }
 
-    // Starts a new conversion and returns immediately while it runs in the background.
+    // Starts a conversion and returns immediately while it runs in the background.
+    //
+    // Idempotent: asking for a conversion that is already running, or already finished, answers
+    // 202 with that conversion rather than 409. The state the caller wants either is being reached
+    // or has been, and the 409 it used to get only meant "DELETE first, then ask again" — which is
+    // what both clients ended up doing by hand. A failed or superseded conversion is replaced,
+    // since neither is a result worth keeping. `?force=true` replaces whatever is stored.
+    //
+    // The 202 carries the job's current state, so a caller learns whether it is waiting on a fresh
+    // conversion or can go straight to the artifacts without a second request.
     [HttpPost("{jobId}")]
-    public async Task<IActionResult> StartConversion(string jobId)
+    public async Task<IActionResult> StartConversion(string jobId, [FromQuery] bool force = false)
     {
         var (failure, exchange) = await ResolveJobAsync(jobId);
         if (failure is not null) { return failure; }
 
         TryGetBearerToken(out var bearerToken);
-        // A superseded conversion is not a conflict — it is exactly the case a new conversion is
-        // for, and starting one replaces it.
-        if (ConversionService.IsUsable(_conversionService.GetStatus(exchange)))
-        {
-            return Conflict(new ProblemDetails
-            {
-                Title = "Conversion already in progress",
-                Detail = "This exchange is already being processed. Delete the current conversion first if you want to start it again.",
-                Status = StatusCodes.Status409Conflict
-            });
-        }
-        _conversionService.StartObjConversion(exchange, bearerToken);
+        var status = _conversionService.StartConversion(exchange, bearerToken, force);
+        AddPresignedUrls(exchange, status);
 
-        return Accepted($"/api/jobs/{exchange.Job.Value}");
+        return Accepted($"/api/jobs/{exchange.Job.Value}", status);
     }
 
     // Deletes the conversion results for a job. This does not affect the exchange itself or its
@@ -77,7 +76,7 @@ public sealed class JobsController : ControllerBase
     // the presigned URLs in a status response — which is the only way to hand these bytes to
     // something that cannot send an Authorization header, such as a <model-viewer> `src`.
     [HttpGet("{jobId}/artifacts/{artifact}")]
-    [Produces("model/obj", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
+    [Produces("model/obj", "model/mtl", "model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream")]
     public async Task<IActionResult> GetArtifact(string jobId, string artifact, [FromQuery] string? secret)
     {
         if (!string.IsNullOrEmpty(secret))
